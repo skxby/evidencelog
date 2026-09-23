@@ -25,6 +25,18 @@ from app.analysis.idempotency import (
     is_retryable,
     make_idempotency_key,
 )
+from app.analysis.knowledge_staging import (
+    candidate_id,
+    load_candidates,
+    staging_path,
+    write_candidates,
+)
+from app.analysis.persistence import (
+    EvidencePersistenceError,
+    PersistenceResult,
+    assert_no_evidence_violation,
+    persist_insights,
+)
 from app.analysis.retry import (
     MAX_RETRIES,
     FallbackOutcome,
@@ -51,11 +63,13 @@ __all__ = [
     "PIPELINE_VERSION",
     "CancelledError",
     "ErrorKind",
+    "EvidencePersistenceError",
     "FallbackOutcome",
     "HeartbeatRecord",
     "IdempotencyInputs",
     "IllegalTransitionError",
     "NonRetryableError",
+    "PersistenceResult",
     "RetryOutcome",
     "RetryPolicy",
     "RunExecutor",
@@ -63,9 +77,11 @@ __all__ = [
     "RunRequest",
     "StateMachine",
     "allowed_targets",
+    "assert_no_evidence_violation",
     "call_with_fallback",
     "call_with_retry",
     "can_transition",
+    "candidate_id",
     "canonical_json",
     "check_cancelled",
     "classify_error",
@@ -76,6 +92,10 @@ __all__ = [
     "is_retryable",
     "is_terminal",
     "is_zombie",
+    "load_candidates",
     "make_idempotency_key",
+    "persist_insights",
+    "staging_path",
     "validate_heartbeat_timeout",
+    "write_candidates",
 ]
