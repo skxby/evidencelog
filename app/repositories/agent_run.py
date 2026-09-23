@@ -49,3 +49,38 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
     def model_calls_of(self, project_id: int, run_id: int) -> list[dict[str, Any]]:
         run = self.get(project_id, run_id)
         return list(run.model_calls or []) if run is not None else []
+
+    def append_tool_usage(self, project_id: int, run_id: int, usage: dict[str, Any]) -> bool:
+        """把一次工具执行记录追加到 `tool_usage`（阶段 05 验收：执行结果可记录到 Run）。
+
+        `tool_usage` 是 JSONB，故写入前先确认可序列化：工具输出里可能混入
+        `datetime` 之类的对象，直接塞进去会在 flush 时抛 TypeError
+        （阶段 04 已经在这上面栽过一次）。不可序列化时**明确报错**，
+        而不是让脏数据悄悄进库。
+        """
+        import json
+
+        try:
+            json.dumps(usage)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"tool_usage 含有不可 JSON 序列化的内容：{type(exc).__name__}: {exc}"
+            ) from exc
+
+        run = self.session.execute(
+            self.scoped(project_id).where(AgentRun.id == run_id).with_for_update()
+        ).scalar_one_or_none()
+        if run is None:
+            return False
+
+        existing = run.tool_usage or {}
+        # 约定结构：{"<tool_name>": [<每次执行的记录>, ...]}
+        tool_name = str(usage.get("tool", "unknown"))
+        history = list(existing.get(tool_name, []))
+        history.append(usage)
+        run.tool_usage = {**existing, tool_name: history}
+        return True
+
+    def tool_usage_of(self, project_id: int, run_id: int) -> dict[str, Any]:
+        run = self.get(project_id, run_id)
+        return dict(run.tool_usage or {}) if run is not None else {}
