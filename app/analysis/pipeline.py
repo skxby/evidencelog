@@ -183,6 +183,9 @@ def run_detection(
             "value": (e.get("payload") or {}).get("value"),
             "timestamp": e.get("timestamp"),
             "severity": e.get("severity", "low"),
+            # 进程名要传下去：崩溃迹象常常只在进程名里
+            # （如 CrashReporterSupportHelper），只看 message 会漏检。
+            "proc": (e.get("metadata") or {}).get("proc") or e.get("proc"),
         }
         for e in events
     ]

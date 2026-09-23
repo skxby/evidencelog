@@ -197,6 +197,75 @@ def parse_line(line: str) -> dict[str, Any] | None:
     return None
 
 
+# ============================================================
+# 指标抽取（把 message 里的 `name=value` 变成结构化指标）
+# ============================================================
+
+#: 本领域识别的指标名与其单位。与 ComputerMonitoringDomain.metric_specs() 同口径。
+#: 放在解析器里是因为**抽取发生在解析阶段**，解析器不该反向依赖领域类。
+METRIC_UNITS: dict[str, str] = {
+    "cpu_used": "%",
+    "memory_used": "%",
+    "disk_used": "%",
+    "load_avg": "",
+}
+
+#: 别名：不同系统对同一指标的叫法不同，统一到规范名。
+_METRIC_ALIASES: dict[str, str] = {
+    "cpu": "cpu_used",
+    "mem": "memory_used",
+    "mem_used": "memory_used",
+    "memory": "memory_used",
+    "disk": "disk_used",
+    "load": "load_avg",
+    "loadavg": "load_avg",
+}
+
+#: 匹配 `cpu_used=92.4` / `memory_used: 88%` / `disk_used = 96`
+_METRIC_PAIR = re.compile(
+    r"\b(?P<name>[a-z][a-z0-9_]*)\s*[:=]\s*(?P<value>-?\d+(?:\.\d+)?)\s*(?P<unit>%|[a-zA-Z/]*)?"
+)
+
+
+def canonical_metric_name(name: str) -> str:
+    """把别名归一到规范名；未知名字原样返回。"""
+    return _METRIC_ALIASES.get(name.lower(), name.lower())
+
+
+def extract_metrics(message: str) -> list[dict[str, Any]]:
+    """从 message 里抽出已知指标。
+
+    **为什么必须有这一步**：真实系统日志的指标写在消息文本里
+    （`cpu_used=92.4%`），不是结构化 JSON 字段。没有它，`metric_name` / `value`
+    永远是空的，`CPUSpike` / `MemoryGrowth` / `DiskFull` 三个 analyzer 在
+    **任何真实日志上都不会触发** —— 它们会变成"写了但从不生效"的代码。
+    上传解析管道与这里走的是同一条抽取路径，不存在"只有测试能触发"的旁路。
+    """
+    if not message:
+        return []
+
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for match in _METRIC_PAIR.finditer(message):
+        name = canonical_metric_name(match.group("name"))
+        if name not in METRIC_UNITS or name in seen:
+            continue
+        try:
+            value = float(match.group("value"))
+        except ValueError:
+            continue
+        seen.add(name)
+        found.append(
+            {
+                "metric_name": name,
+                "value": value,
+                # 消息里没写单位就用该指标的约定单位
+                "unit": match.group("unit") or METRIC_UNITS[name],
+            }
+        )
+    return found
+
+
 def infer_severity(raw: dict[str, Any]) -> str:
     """从显式等级词或 message 关键词推断严重度。显式等级词优先。"""
     level = str(raw.get("level", "")).lower()

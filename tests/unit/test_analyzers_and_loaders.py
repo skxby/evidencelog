@@ -371,3 +371,55 @@ def test_shipped_seed_knowledge_is_empty_by_design():
 def test_assert_confirmable_accepts_run_id_without_event_ids():
     entry = validate_entry(_entry(evidence={"run_id": "r1", "event_ids": []}))
     assert_confirmable(entry)  # 不抛异常
+
+# ============================================================
+# 回归：真实数据暴露出来的两个漏判
+# ============================================================
+
+
+def test_cpu_spike_is_detected_when_the_run_is_followed_by_a_drop():
+    """尖峰后回落仍须命中。
+
+    最早的实现用"跑到最后还剩多少连续计数"，峰值后面只要跟着一个正常采样点，
+    计数就归零 —— 真实日志几乎总是这样（流量回落后才写日志）。
+    原来的单测输入恰好以高值结尾，所以一直没暴露。
+    """
+    values = [70, 72, 86, 91, 93, 94, 95, 94, 92, 88]
+    findings = CPUSpike().analyze([metric("cpu_used", v) for v in values])
+    assert len(findings) == 1, "峰值后回落被误判为「没有持续」"
+    assert findings[0].detail["consecutive_samples"] == 6
+    assert findings[0].detail["peak"] == 95.0
+
+
+def test_cpu_spike_trailing_drop_does_not_mask_a_brief_spike():
+    """回归不能把判定放宽：单点尖峰仍不算持续。"""
+    assert CPUSpike().analyze([metric("cpu_used", v) for v in [10, 99, 10]]) == []
+
+
+def test_process_crash_matches_the_process_name_too():
+    """崩溃迹象常常只在进程名里。
+
+    真实样本：`CrashReporterSupportHelper[252]: Internal name did not resolve...`
+    —— 消息本身完全正常，但是崩溃上报程序在说话。只看 message 会漏掉整类行。
+    """
+    findings = ProcessCrash().analyze(
+        [{"message": "Internal name did not resolve to internal address!",
+          "proc": "CrashReporterSupportHelper", "event_id": 7}]
+    )
+    assert len(findings) == 1
+    assert findings[0].detail["matched_in"] == "进程名"
+    assert findings[0].event_ids == [7]
+
+
+def test_process_crash_still_matches_the_message():
+    findings = ProcessCrash().analyze(
+        [{"message": "kernel: segfault at 0", "proc": "kernel", "event_id": 1}]
+    )
+    assert len(findings) == 1
+    assert findings[0].detail["matched_in"] == "消息"
+
+
+def test_process_crash_ignores_ordinary_traffic():
+    assert ProcessCrash().analyze(
+        [{"message": "service started normally", "proc": "systemd", "event_id": 1}]
+    ) == []

@@ -1,0 +1,11 @@
+{
+  "description": "内存持续增长：期望命中 MemoryGrowth",
+  "expect_anomaly_types": [
+    "MemoryGrowth"
+  ],
+  "min_parsed": 10,
+  "sources": {
+    "anomaly": "计划第 958 行「期望命中内存持续增长」",
+    "analyzer": "计划第 409 行「MemoryGrowth：内存指标在时间窗口内持续上升」"
+  }
+}

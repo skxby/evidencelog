@@ -1,0 +1,13 @@
+{
+  "description": "进程崩溃：期望命中 ProcessCrash（一条真实 crash 上报行）",
+  "expect_anomaly_types": [
+    "ProcessCrash"
+  ],
+  "min_parsed": 15,
+  "sources": {
+    "anomaly": "计划第 959 行「期望命中进程崩溃」",
+    "analyzer": "计划第 411 行「ProcessCrash：message 命中 crash / segfault / oom 等模式」",
+    "dataset": "首行取自 logs/Mac_2k.log 的 CrashReporterSupportHelper 真实上报行",
+    "tier_note": "命中为 high 严重度 → 按计划第 778 行升到 L3；计划未对该场景指定等级"
+  }
+}

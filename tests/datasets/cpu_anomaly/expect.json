@@ -1,0 +1,12 @@
+{
+  "description": "CPU 持续高位：期望命中 CPUSpike（峰值 93 未过 95，不升 high）",
+  "expect_anomaly_types": [
+    "CPUSpike"
+  ],
+  "min_parsed": 10,
+  "sources": {
+    "anomaly": "计划第 957 行「期望命中 CPU 异常」",
+    "analyzer": "计划第 408 行「CPUSpike：cpu_used > 90% 持续若干采样点」",
+    "dataset": "真实 logs/ 里没有指标日志，故按 Linux_2k.log 的 syslog 格式合成；解析路径与真实数据完全一致"
+  }
+}

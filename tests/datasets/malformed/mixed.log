@@ -1,0 +1,10 @@
+Jun 14 15:16:02 combo sshd(pam_unix)[19937]: check pass; user unknown
+Jun 15 04:06:18 combo su(pam_unix)[21416]: session opened for user cyrus by (uid=0)
+Jun 15 04:06:19 combo su(pam_unix)[21416]: session closed for user cyrus
+Jun 15 04:12:42 combo su(pam_unix)[22644]: session opened for user news by (uid=0)
+Jun 15 04:12:43 combo su(pam_unix)[22644]: session closed for user news
+### not a log line at all ###
+{"broken": json, without closing brace
+......... .. ... 
+Sep 99 99:99:99 host proc[1]: impossible timestamp
+random binary-ish  garbage

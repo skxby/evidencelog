@@ -16,7 +16,11 @@ from app.domains.computer_monitoring.analyzers import (
     Analyzer,
 )
 from app.domains.computer_monitoring.knowledge import load_all
-from app.domains.computer_monitoring.parser import infer_severity, parse_line
+from app.domains.computer_monitoring.parser import (
+    extract_metrics,
+    infer_severity,
+    parse_line,
+)
 from app.domains.computer_monitoring.runbooks import load_runbooks
 from app.domains.protocol import (
     DomainBase,
@@ -84,11 +88,30 @@ class ComputerMonitoringDomain(DomainBase):
         )
 
     def _extract_metric_payload(self, raw: RawRecord) -> dict[str, Any] | None:
-        """从原始字段抽取指标。抽不到就返回 None（不硬凑成指标）。"""
+        """从原始字段或消息文本里抽取指标。抽不到就返回 None（不硬凑成指标）。
+
+        两条来源：
+        1. 原始字段已带 `metric_name` / `value`（结构化 JSONL 日志走这条）；
+        2. 消息文本里写了 `name=value`（真实系统日志走这条，见 `extract_metrics`）。
+
+        缺了第 2 条，`CPUSpike` / `MemoryGrowth` / `DiskFull` 在真实日志上
+        永远不会触发。
+        """
         metric_name = raw.get("metric_name")
         value = raw.get("value")
+
         if metric_name is None or not isinstance(value, (int, float)):
-            return None
+            # 回退到从 message 抽
+            extracted = extract_metrics(str(raw.get("msg", "")))
+            if not extracted:
+                return None
+            primary = extracted[0]
+            metric_name, value = primary["metric_name"], primary["value"]
+            raw.setdefault("unit", primary["unit"])
+            # 一条消息里有多个指标时，其余记进 raw 的 metrics 列表，避免丢失
+            if len(extracted) > 1:
+                raw["metrics"] = extracted
+
         spec = next((s for s in _METRIC_SPECS if s.metric_name == metric_name), None)
         return {
             "metric_name": str(metric_name),

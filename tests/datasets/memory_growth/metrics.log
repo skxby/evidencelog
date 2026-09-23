@@ -1,0 +1,10 @@
+Sep 23 12:00:00 logagent-host monitord[9001]: memory_used=60% swap=0
+Sep 23 12:01:00 logagent-host monitord[9001]: memory_used=63% swap=0
+Sep 23 12:02:00 logagent-host monitord[9001]: memory_used=67% swap=0
+Sep 23 12:03:00 logagent-host monitord[9001]: memory_used=71% swap=0
+Sep 23 12:04:00 logagent-host monitord[9001]: memory_used=74% swap=0
+Sep 23 12:05:00 logagent-host monitord[9001]: memory_used=78% swap=0
+Sep 23 12:06:00 logagent-host monitord[9001]: memory_used=81% swap=0
+Sep 23 12:07:00 logagent-host monitord[9001]: memory_used=84% swap=0
+Sep 23 12:08:00 logagent-host monitord[9001]: memory_used=86% swap=0
+Sep 23 12:09:00 logagent-host monitord[9001]: memory_used=88% swap=0

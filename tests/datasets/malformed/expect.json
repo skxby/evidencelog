@@ -1,0 +1,10 @@
+{
+  "description": "坏格式：期望明确失败而非假报告（好行照常入库，坏行如实计数）",
+  "expect_explicit_failure": true,
+  "min_bad_lines": 1,
+  "min_parsed": 1,
+  "sources": {
+    "failure": "计划第 960 行「坏格式，期望明确失败而非假报告」+ 红线 4「失败不静默」",
+    "min_parsed": "混杂样本里含 5 行合法日志，它们应当照常入库；单行坏数据不该拖垮整文件（计划第 531 行）"
+  }
+}

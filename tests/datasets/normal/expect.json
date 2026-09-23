@@ -1,0 +1,11 @@
+{
+  "description": "正常日志：期望纯代码统计报告，不调用模型",
+  "tier": "L0",
+  "expect_no_anomalies": true,
+  "min_parsed": 50,
+  "sources": {
+    "tier": "计划第 956 行「正常日志，期望 L0、无异常 Insight」",
+    "tier_rule": "计划第 774 行「L0：无 error 且无 anomaly」",
+    "min_parsed": "样本取自 logs/Linux_2k.log 的低危行，共 60 行；下限留出余量"
+  }
+}

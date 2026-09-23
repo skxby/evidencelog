@@ -90,16 +90,22 @@ class CPUSpike(Analyzer):
         if len(values) < self.min_samples:
             return []  # 样本不足：不判定
 
-        consecutive = 0
+        # 必须记录**出现过的最大连续段**，而不是"跑到最后还剩多少"。
+        # 真实日志的峰值后面通常跟着回落的采样点，用尾部计数会把真实尖峰
+        # 判成"没有持续" —— 这个 bug 只在数据末尾是低值时才暴露，
+        # 单测里输入恰好以高值结尾就永远发现不了。
+        longest_run = 0
+        current_run = 0
         peak = 0.0
         for value in values:
             if value > self.threshold:
-                consecutive += 1
+                current_run += 1
                 peak = max(peak, value)
+                longest_run = max(longest_run, current_run)
             else:
-                consecutive = 0
+                current_run = 0
 
-        if consecutive < self.min_samples:
+        if longest_run < self.min_samples:
             return []
 
         return [
@@ -107,13 +113,13 @@ class CPUSpike(Analyzer):
                 analyzer=self.name,
                 severity="high" if peak > 95 else "medium",
                 message=(
-                    f"CPU 持续高位：连续 {consecutive} 个采样点超过 {self.threshold}%，"
+                    f"CPU 持续高位：连续 {longest_run} 个采样点超过 {self.threshold}%，"
                     f"峰值 {peak}%"
                 ),
                 metric_name="cpu_used",
                 detail={
                     "threshold": self.threshold,
-                    "consecutive_samples": consecutive,
+                    "consecutive_samples": longest_run,
                     "peak": peak,
                 },
             )
@@ -206,7 +212,11 @@ class DiskFull(Analyzer):
 
 
 class ProcessCrash(Analyzer):
-    """message 命中 crash / segfault / oom 等模式（计划第 411 行）。
+    """message **或进程名** 命中 crash / segfault / oom 等模式（计划第 411 行）。
+
+    为什么也看进程名：真实系统日志的崩溃迹象常常只在进程名里，例如
+    `CrashReporterSupportHelper[252]: Internal name did not resolve...` ——
+    消息本身完全正常，但**是崩溃上报程序在说话**。只看 message 会漏掉这类行。
 
     只做确定性关键词匹配 —— **不是根因判定**，产出的是候选异常。
     """
@@ -220,17 +230,19 @@ class ProcessCrash(Analyzer):
         findings: list[AnalyzerFinding] = []
         for row in samples:
             message = str(row.get("message", ""))
-            lowered = message.lower()
-            hit = next((p for p in self.patterns if p in lowered), None)
+            process = str(row.get("proc") or row.get("process") or "")
+            haystack = f"{process} {message}".lower()
+            hit = next((p for p in self.patterns if p in haystack), None)
             if hit is None:
                 continue
+            where = "进程名" if hit in process.lower() else "消息"
             findings.append(
                 AnalyzerFinding(
                     analyzer=self.name,
                     severity="high",
-                    message=f"进程异常迹象（命中 “{hit}”）：{message[:200]}",
+                    message=f"进程异常迹象（{where}命中 “{hit}”）：{message[:200]}",
                     event_ids=[row["event_id"]] if "event_id" in row else [],
-                    detail={"pattern": hit},
+                    detail={"pattern": hit, "matched_in": where},
                 )
             )
         return findings
