@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-from datetime import timezone
 from pathlib import Path
 
 import pytest
@@ -103,7 +102,10 @@ def test_parse_log4j_line_handles_nested_brackets_in_thread():
     assert raw["level"] == "INFO"
     assert raw["thread"].startswith("QuorumPeer[myid=1]")
     assert "Notification time out" in raw["msg"]
-    assert raw["ts"].tzinfo is timezone.utc
+    # 刻意是 naive：syslog 时间戳不含时区，无权假定 UTC。
+    # 时区由上层按 DEFAULT_TIMEZONE 解释后转 UTC（计划第 539 行）。
+    assert raw["ts"].tzinfo is None
+    assert raw["ts_has_tz"] is False
 
 
 def test_parse_apache_line():
@@ -195,13 +197,18 @@ def test_four_samples_parse_perfectly(name: str):
     assert bad == [], f"{name} 有 {len(bad)} 行解析失败，例如：{bad[:2]}"
 
 
-def test_parsed_events_carry_timezone_aware_timestamps():
-    """时间戳必须带时区 —— 这是后续「存 UTC」的前提。"""
+def test_domain_parser_returns_naive_timestamps_and_flags_missing_tz():
+    """领域层如实报告「缺时区」，不擅自假定 UTC。
+
+    若这里硬编码 UTC，`DEFAULT_TIMEZONE` 就成了死配置，且所有日志时间会
+    整体偏移一个时区——而偏移后的报告看起来完全正常，属最危险的一类错误。
+    """
     for name in SYSLOG_FILES:
         for line in _lines(name)[:200]:
             raw = parse_line(line)
             if raw is not None:
-                assert raw["ts"].tzinfo is not None, f"{name}: {line[:60]}"
+                assert raw["ts"].tzinfo is None, f"{name}: {line[:60]}"
+                assert raw["ts_has_tz"] is False, f"{name}: {line[:60]}"
 
 
 def test_web_access_logs_are_not_claimed_by_this_domain():

@@ -95,8 +95,12 @@ def parse_syslog_line(
 ) -> dict[str, Any] | None:
     """解析 syslog 风格行。
 
-    syslog 时间戳**不含年份**。`assume_year=None` 时取当前 UTC 年——这是**有损假设**，
-    故返回值里带 `ts_has_year=False` 让上层知道；跨年推断属阶段 04 归一化职责。
+    **返回 naive datetime**：syslog 时间戳既不含量份也不含时区，本函数无权
+    假定它是 UTC。时区由上层按 `.env` 的 `DEFAULT_TIMEZONE` 解释后转 UTC
+    （计划第 539 行），年份缺失由上层按「当前年 + 跨年容差」补（第 538 行）。
+
+    在这里硬编码 tzinfo=UTC 会让 DEFAULT_TIMEZONE 变成死配置，
+    并把所有日志时间整体偏移一个时区 —— 而且偏移后看起来完全正常。
     """
     match = _RE_SYSLOG.match(line)
     if match is None:
@@ -111,7 +115,8 @@ def parse_syslog_line(
 
     year = assume_year if assume_year is not None else datetime.now(timezone.utc).year
     try:
-        ts = datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
+        # 刻意 naive：syslog 不含时区，上层按 DEFAULT_TIMEZONE 赋予
+        ts = datetime(year, month, day, hour, minute, second)  # noqa: DTZ001
     except ValueError:
         return None  # 非法日期（如 2 月 30 日）明确判为坏行
 
@@ -123,6 +128,7 @@ def parse_syslog_line(
     return {
         "ts": ts,
         "ts_has_year": False,
+        "ts_has_tz": False,
         "host": match.group("host"),
         "proc": rest.group("proc"),
         "pid": int(pid_raw) if pid_raw is not None else None,
@@ -138,14 +144,14 @@ def parse_log4j_line(line: str) -> dict[str, Any] | None:
     if match is None:
         return None
     try:
-        ts = datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S,%f").replace(
-            tzinfo=timezone.utc
-        )
+        # 同上：log4j 时间戳不带时区
+        ts = datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S,%f")  # noqa: DTZ007
     except ValueError:
         return None
     return {
         "ts": ts,
         "ts_has_year": True,
+        "ts_has_tz": False,
         "level": match.group("level"),
         "thread": match.group("thread"),
         "msg": match.group("msg").strip(),
@@ -159,14 +165,16 @@ def parse_apache_line(line: str) -> dict[str, Any] | None:
     if match is None:
         return None
     try:
-        ts = datetime.strptime(
+        # 同上：Apache 时间戳不带时区
+        ts = datetime.strptime(  # noqa: DTZ007
             match.group("ts").strip("[]"), "%a %b %d %H:%M:%S %Y"
-        ).replace(tzinfo=timezone.utc)
+        )
     except ValueError:
         return None
     return {
         "ts": ts,
         "ts_has_year": True,
+        "ts_has_tz": False,
         "level": match.group("level"),
         "msg": match.group("msg").strip(),
         "format": "apache",
