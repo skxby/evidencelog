@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}分析报告{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="spread">
+    <h2>分析报告 · Run #{{ run_id }}</h2>
+    <a class="small" href="/runs/{{ run_id }}?project_id={{ project_id }}">← 返回状态页</a>
+  </div>
+  <div id="report-status" class="row"></div>
+  <div id="incomplete-banner" class="banner banner-warn" hidden></div>
+  <div id="failed-banner" class="banner banner-error" hidden></div>
+</div>
+
+<div class="card">
+  <h2>结论</h2>
+  <p class="muted small">
+    四层语义：<span class="semantic semantic-fact">✓ 确认</span>
+    <span class="semantic semantic-inference">→ 推测</span>
+    <span class="semantic semantic-possibility">? 可能</span>
+    <span class="semantic semantic-unknown">− 未知</span>
+    —— 只有能引用具体事件的结论才会标「确认」。
+  </p>
+  <div id="insights"></div>
+</div>
+
+<div class="card">
+  <h2>待确认知识</h2>
+  <p class="muted small">
+    这些是分析过程中发现的、现有知识未覆盖的候选。确认后下次分析生效；
+    「这其实不是问题」会记为误报，之后同类异常会被抑制。
+  </p>
+  <div id="candidates"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const RUN_ID = {{ run_id }};
+const PROJECT_ID = "{{ project_id }}";
+
+function runApi() { return `/api/runs/${RUN_ID}?project_id=${encodeURIComponent(PROJECT_ID)}`; }
+
+function renderRunHeader(run) {
+  const box = document.getElementById('report-status');
+  box.textContent = '';
+  box.appendChild(statusPill(run.status));
+  box.appendChild(el('span', { class: 'muted small', text:
+    `成本 ${fmtCost(run.cost_actual)} · Token ${run.tokens_input ?? 0}/${run.tokens_output ?? 0}` }));
+
+  const metadata = run.run_metadata || {};
+  const incomplete = document.getElementById('incomplete-banner');
+  if (run.status === 'partial_success') {
+    // 计划第 910 行：顶部显著标注「结果不完整」及中断原因
+    incomplete.hidden = false;
+    incomplete.textContent = '';
+    incomplete.appendChild(el('strong', { text: '⚠ 结果不完整' }));
+    incomplete.appendChild(el('div', { class: 'small', text:
+      `中断原因：${metadata.stop_reason || '未知'}。${metadata.note || ''}` }));
+  }
+
+  const failed = document.getElementById('failed-banner');
+  if (run.status === 'failed' || run.status === 'timeout') {
+    failed.hidden = false;
+    failed.textContent = '';
+    failed.appendChild(el('strong', { text: '本 Run 未产出结论' }));
+    failed.appendChild(el('div', { class: 'small', text:
+      `失败阶段：${run.current_phase || '未知'} · 原因：${run.error || '未提供'}` }));
+  }
+}
+
+function renderInsight(insight, run) {
+  const sem = semanticsOf(insight.type);
+  const node = el('div', { class: `insight insight-${sem.cls}` });
+
+  node.appendChild(el('div', {}, [
+    el('span', { class: `semantic semantic-${sem.cls}`, text: `${sem.symbol} ${sem.label}` }),
+    el('span', { class: 'insight-title', text: insight.title }),
+    el('span', { class: 'muted small', text: `　置信度 ${(insight.confidence ?? 0).toFixed(2)}` }),
+    el('span', { class: 'muted small', text: '　' }),
+    severityPill(insight.severity),
+  ]));
+
+  if (insight.summary) node.appendChild(el('div', { class: 'insight-summary', text: insight.summary }));
+
+  if (insight.reasoning) {
+    node.appendChild(el('div', { class: 'insight-extra' }, [
+      el('div', { class: 'label', text: '推理过程（inference 必填）' }),
+      el('div', { text: insight.reasoning }),
+    ]));
+  }
+  if (insight.limitations) {
+    node.appendChild(el('div', { class: 'insight-extra' }, [
+      el('div', { class: 'label', text: '局限说明（possibility / unknown 必填）' }),
+      el('div', { text: insight.limitations }),
+    ]));
+  }
+
+  // 证据：可点击展开，展示关联事件 / 时间范围 / 计算说明（计划第 908 行）
+  const details = el('details', { class: 'evidence' });
+  details.appendChild(el('summary', { text:
+    insight.type === 'fact' ? '查看证据（可核对）' : '查看证据' }));
+  const evidenceBox = el('div', { class: 'mt' });
+  evidenceBox.appendChild(el('div', { class: 'muted small', text: '加载中…' }));
+  details.appendChild(evidenceBox);
+  details.addEventListener('toggle', async () => {
+    if (!details.open || details.dataset.loaded) return;
+    details.dataset.loaded = '1';
+    evidenceBox.textContent = '';
+    try {
+      const rows = await API.get(
+        `/api/insights/${insight.id}/evidence?project_id=${encodeURIComponent(PROJECT_ID)}`);
+      if (!rows.length) {
+        // fact 没有证据是异常情况，要明确说出来而不是留白
+        evidenceBox.appendChild(el('div', { class: 'banner banner-error',
+          text: '这条结论没有任何证据记录 —— 若它是「确认」，说明上游证据校验被绕过，请报告。' }));
+        return;
+      }
+      for (const row of rows) {
+        const table = el('table');
+        table.appendChild(el('tr', {}, [
+          el('th', { text: '关联事件 id' }),
+          el('td', { class: 'mono', text: (row.event_ids || []).join(', ') || '—' }),
+        ]));
+        table.appendChild(el('tr', {}, [
+          el('th', { text: '时间范围' }),
+          el('td', { class: 'mono', text: row.time_range ? JSON.stringify(row.time_range) : '—' }),
+        ]));
+        table.appendChild(el('tr', {}, [
+          el('th', { text: '计算说明' }),
+          el('td', { text: row.calculation || '—' }),
+        ]));
+        table.appendChild(el('tr', {}, [
+          el('th', { text: '说明' }),
+          el('td', { text: row.description || '—' }),
+        ]));
+        evidenceBox.appendChild(table);
+      }
+    } catch (error) {
+      evidenceBox.appendChild(el('div', { class: 'banner banner-error', text: `加载证据失败：${error.message}` }));
+    }
+  });
+  // 命中异常附对应 runbook（只读展示处置步骤，计划第 909 行）
+  const books = (insight.run_metadata || {}).runbooks || [];
+  for (const book of books) {
+    const box = el('div', { class: 'runbook' });
+    box.appendChild(el('h4', { text: `处置步骤 · ${book.title}（${book.id}）` }));
+    const list = el('ol');
+    for (const step of (book.steps || [])) list.appendChild(el('li', { text: step }));
+    box.appendChild(list);
+    box.appendChild(el('div', { class: 'readonly', text:
+      'V1 只读展示，不自动执行任何步骤。' }));
+    node.appendChild(box);
+  }
+
+  node.appendChild(details);
+  return node;
+}
+
+function renderCandidate(candidate) {
+  const node = el('div', { class: 'list-item' });
+  const info = el('div', {});
+  info.appendChild(el('div', {}, [
+    el('strong', { text: candidate.title }),
+    el('span', { class: 'muted small', text: `　${candidate.kind} · 置信度 ${(candidate.confidence ?? 0).toFixed(2)}` }),
+  ]));
+  if (candidate.description) {
+    info.appendChild(el('div', { class: 'muted small', text: candidate.description }));
+  }
+  const evidence = candidate.evidence || {};
+  info.appendChild(el('div', { class: 'muted small mono', text:
+    `证据：run ${evidence.run_id || '—'} · 事件 ${(evidence.event_ids || []).join(', ') || '—'}` }));
+
+  const actions = el('div', { class: 'row' });
+  const act = async (action, label, extra = {}) => {
+    try {
+      const response = await API.post(
+        `/api/knowledge/candidates/${candidate.id}/${action}?project_id=${encodeURIComponent(PROJECT_ID)}`,
+        extra && Object.keys(extra).length ? extra : undefined);
+      node.style.opacity = '.5';
+      node.appendChild(el('span', { class: 'pill pill-ok', text: label }));
+      void response;
+    } catch (error) {
+      showError(`${label}失败：${error.message}`);
+    }
+  };
+  actions.appendChild(el('button', { class: 'primary', text: '确认',
+    onclick: () => act('confirm', '已确认') }));
+  actions.appendChild(el('button', { text: '这其实不是问题',
+    onclick: () => act('false-positive', '已记为误报') }));
+  actions.appendChild(el('button', { class: 'danger', text: '丢弃',
+    onclick: () => act('reject', '已丢弃') }));
+
+  node.appendChild(info);
+  node.appendChild(actions);
+  return node;
+}
+
+async function load() {
+  try {
+    const run = await API.get(runApi());
+    renderRunHeader(run);
+
+    const insights = await API.get(
+      `/api/runs/${RUN_ID}/insights?project_id=${encodeURIComponent(PROJECT_ID)}`);
+    const list = document.getElementById('insights');
+    list.textContent = '';
+    if (!insights.length) {
+      list.appendChild(el('div', { class: 'empty', text:
+        '本 Run 没有产出结论。若状态是「部分成功」或「失败」，请看上方的中断原因。' }));
+    } else {
+      // 严重度 + 语义排序，最需要看的排前面
+      const order = { high: 0, medium: 1, low: 2 };
+      const semanticOrder = { fact: 0, inference: 1, possibility: 2, unknown: 3 };
+      insights.sort((a, b) =>
+        (order[a.severity] ?? 9) - (order[b.severity] ?? 9)
+        || (semanticOrder[a.type] ?? 9) - (semanticOrder[b.type] ?? 9));
+      for (const insight of insights) list.appendChild(renderInsight(insight, run));
+    }
+  } catch (error) {
+    showError(`加载报告失败：${error.message}`);
+  }
+
+  try {
+    const candidates = await API.get(
+      `/api/projects/${encodeURIComponent(PROJECT_ID)}/knowledge/candidates`);
+    const box = document.getElementById('candidates');
+    box.textContent = '';
+    if (!candidates.length) {
+      box.appendChild(el('div', { class: 'empty', text: '暂无待确认的候选知识。' }));
+    } else {
+      for (const candidate of candidates) box.appendChild(renderCandidate(candidate));
+    }
+  } catch (error) {
+    showError(`加载待确认知识失败：${error.message}`);
+  }
+}
+
+load();
+</script>
+{% endblock %}

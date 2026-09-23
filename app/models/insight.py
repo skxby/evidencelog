@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -18,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models import enums
@@ -54,6 +56,12 @@ class Insight(Base):
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 局限说明：降级 / 证据不足时必须写明，不许静默（红线 4）
     limitations: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # 确定性诊断信息的落点（命中的 analyzer、对应 runbook 快照等）。
+    # **不单独建表**：这些是「展示用的附注」，不是需要查询/关联的业务实体；
+    # 为它们建表会让 9 表边界膨胀，且没有查询需求支撑。
+    # 内容由流水线填入，只放 JSON 安全的数据（阶段 04/05 都在这上面栽过）。
+    run_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         TimestampTZ, nullable=False, default=utcnow

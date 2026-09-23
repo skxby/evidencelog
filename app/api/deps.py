@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import Depends, Header, HTTPException, Path, status
+from fastapi import Cookie, Depends, Header, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from app.api.security import TokenError, bearer_token_from_header, decode_access_token
@@ -36,11 +36,26 @@ def _unauthorized(detail: str, *, headers: dict[str, str] | None = None) -> HTTP
 def get_current_user(
     session: SessionDep,
     authorization: Annotated[str | None, Header()] = None,
+    access_token: Annotated[str | None, Cookie()] = None,
 ) -> User:
-    """从 `Authorization: Bearer <token>` 解出当前用户。"""
+    """从 `Authorization: Bearer <token>` **或** `httpOnly` Cookie 解出当前用户。
+
+    计划第 858 行定的是「API 走 Bearer；网页把 token 存 httpOnly Cookie」。
+    既然 token 存在 httpOnly Cookie 里，浏览器上的 JS 读不到它，
+    那么**网页发出的请求只能靠 Cookie 鉴权** —— 所以这里必须同时接受两种来源，
+    否则前端只能把 token 塞进可被 JS 读取的地方，违背 httpOnly 的初衷。
+
+    优先级：显式 Bearer 头 > Cookie（脚本/CLI 用头，浏览器用 Cookie）。
+    """
     settings = get_settings()
+    token: str | None = None
     try:
-        token = bearer_token_from_header(authorization)
+        if authorization:
+            token = bearer_token_from_header(authorization)
+        elif access_token:
+            token = access_token
+        else:
+            raise TokenError("缺少 Authorization 头或登录 Cookie")
         payload = decode_access_token(token, secret_key=settings.secret_key)
     except TokenError as exc:
         raise _unauthorized(str(exc)) from exc

@@ -88,6 +88,7 @@ def execute_run_task(
                     events=events,
                 ),
                 analyzers=domain.analyzers(),
+                domain=domain,
                 router=router,
                 record=True,
                 project_id_for_recording=project_id,
@@ -109,6 +110,7 @@ def execute_run_task(
                     events=events,
                 ),
                 analyzers=domain.analyzers(),
+                domain=domain,
                 router=None,  # 不调模型
             )
             captured["result"] = result

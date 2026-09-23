@@ -27,6 +27,13 @@ app.include_router(auth_projects_router)
 app.include_router(runs_router)
 app.include_router(knowledge_router)
 
+# 前端页面（Jinja2 模板 + 原生 JS，无构建工具）
+from app.web import mount_static
+from app.web.views import router as web_router
+
+app.include_router(web_router)
+mount_static(app)
+
 
 @app.get("/healthz")
 def healthz() -> dict:

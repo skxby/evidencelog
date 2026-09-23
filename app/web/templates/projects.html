@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}项目{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>新建项目</h2>
+  <div class="row">
+    <input id="project-name" placeholder="项目名，如 生产环境日志" style="flex:2;min-width:220px">
+    <input id="project-budget" type="number" min="0" step="0.1" value="10" style="width:130px" title="月度预算（元）">
+    <button class="primary" id="create-btn">创建</button>
+  </div>
+  <p class="muted small">预算单位为人民币元；单次分析的额外上限由服务端策略控制。</p>
+</div>
+
+<div class="card">
+  <h2>项目列表</h2>
+  <div id="projects"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadProjects() {
+  const container = document.getElementById('projects');
+  container.textContent = '';
+  try {
+    const projects = await API.get('/api/projects');
+    if (!projects.length) {
+      container.appendChild(el('div', { class: 'empty', text: '还没有项目，先在上面创建一个。' }));
+      return;
+    }
+    for (const project of projects) {
+      container.appendChild(el('div', { class: 'list-item' }, [
+        el('div', {}, [
+          el('div', {}, [
+            el('a', { href: `/projects/${project.id}`, text: project.name }),
+          ]),
+          el('div', { class: 'muted small', text:
+            `预算 ${fmtCost(project.budget_total)} · 已用 ${fmtCost(project.budget_used)} · ${project.status}` }),
+        ]),
+        el('div', { class: 'row' }, [
+          el('a', { href: `/knowledge/${project.id}`, class: 'small', text: '待确认知识' }),
+          el('a', { href: `/projects/${project.id}`, class: 'small', text: '进入 →' }),
+        ]),
+      ]));
+    }
+  } catch (error) {
+    showError(`加载项目失败：${error.message}`);
+  }
+}
+
+document.getElementById('create-btn').addEventListener('click', async () => {
+  clearError();
+  const name = document.getElementById('project-name').value.trim();
+  const budget = Number(document.getElementById('project-budget').value || 0);
+  if (!name) { showError('请填写项目名'); return; }
+  try {
+    await API.post('/api/projects', { name, budget_total: budget });
+    document.getElementById('project-name').value = '';
+    await loadProjects();
+  } catch (error) {
+    showError(`创建失败：${error.message}`);
+  }
+});
+
+loadProjects();
+</script>
+{% endblock %}

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Run 状态{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="spread">
+    <h2>Run #{{ run_id }}</h2>
+    <div class="row">
+      <span id="status-pill"></span>
+      <button class="danger" id="cancel-btn" type="button">请求取消</button>
+      <button class="primary" id="report-btn" type="button">查看报告 →</button>
+    </div>
+  </div>
+
+  <div id="incomplete-banner" class="banner banner-warn" hidden></div>
+  <div id="failed-banner" class="banner banner-error" hidden></div>
+
+  <h3>阶段进度</h3>
+  <div class="phases" id="phases"></div>
+
+  <table class="mt">
+    <tbody>
+      <tr><th style="width:140px">当前阶段</th><td id="current-phase" class="mono">—</td></tr>
+      <tr><th>Token（入 / 出）</th><td id="tokens" class="mono">—</td></tr>
+      <tr><th>成本</th><td id="cost" class="mono">—</td></tr>
+      <tr><th>开始 / 结束</th><td id="times" class="mono">—</td></tr>
+      <tr><th>最后心跳</th><td id="heartbeat" class="mono">—</td></tr>
+      <tr><th>取消标记</th><td id="cancel-flag" class="mono">—</td></tr>
+    </tbody>
+  </table>
+
+  <p class="muted small mt">
+    状态每 3 秒刷新一次。若 Worker 心跳丢失超过阈值，Run 会被回收为
+    <code>timeout</code>（阈值大于单次最慢调用，避免误杀正在跑长调用的 Run）。
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const RUN_ID = {{ run_id }};
+const PROJECT_ID = "{{ project_id }}";
+let timer = null;
+
+function apiPath() {
+  return `/api/runs/${RUN_ID}?project_id=${encodeURIComponent(PROJECT_ID)}`;
+}
+
+function renderPhases(run) {
+  const container = document.getElementById('phases');
+  container.textContent = '';
+  const history = run.phase_history || [];
+  if (!history.length) {
+    container.appendChild(el('span', { class: 'phase', text: '尚未开始' }));
+    return;
+  }
+  history.forEach((entry, index) => {
+    let cls = 'phase';
+    if (entry.status === 'skipped') cls += ' phase-skipped';
+    else if (index === history.length - 1 && run.status === 'running') cls += ' phase-current';
+    else cls += ' phase-done';
+    container.appendChild(el('span', { class: cls, text: entry.phase || '?' }));
+  });
+}
+
+function renderIncomplete(run) {
+  const box = document.getElementById('incomplete-banner');
+  const metadata = run.run_metadata || {};
+  if (run.status === 'partial_success') {
+    // 计划第 910 行：partial_success 顶部显著标注「结果不完整」及中断原因
+    box.hidden = false;
+    box.textContent = '';
+    box.appendChild(el('strong', { text: '⚠ 结果不完整' }));
+    box.appendChild(el('div', { class: 'small', text:
+      `中断原因：${metadata.stop_reason || '未知'}。${metadata.note || ''}` }));
+    if (metadata.skipped_phases && metadata.skipped_phases.length) {
+      box.appendChild(el('div', { class: 'small', text:
+        `未执行的阶段：${metadata.skipped_phases.join('、')}` }));
+    }
+  } else {
+    box.hidden = true;
+  }
+}
+
+function renderFailed(run) {
+  const box = document.getElementById('failed-banner');
+  if (run.status === 'failed' || run.status === 'timeout') {
+    // 计划第 912 行：显示失败阶段与原因，并提供「重新分析」入口
+    box.hidden = false;
+    box.textContent = '';
+    box.appendChild(el('strong', { text:
+      run.status === 'timeout' ? '任务超时（Worker 心跳丢失）' : '分析失败' }));
+    box.appendChild(el('div', { class: 'small', text:
+      `失败阶段：${run.current_phase || '未知'} · 原因：${run.error || '未提供'}` }));
+    box.appendChild(el('div', { class: 'mt' }, [
+      el('a', { href: `/projects/${PROJECT_ID}`, text: '← 回到项目，重新发起分析（会新建一个 Run）' }),
+    ]));
+  } else {
+    box.hidden = true;
+  }
+}
+
+async function refresh() {
+  try {
+    const run = await API.get(apiPath());
+    clearError();
+
+    const pillBox = document.getElementById('status-pill');
+    pillBox.textContent = '';
+    pillBox.appendChild(statusPill(run.status));
+
+    renderPhases(run);
+    renderIncomplete(run);
+    renderFailed(run);
+
+    document.getElementById('current-phase').textContent = run.current_phase || '—';
+    document.getElementById('tokens').textContent =
+      `${run.tokens_input ?? 0} / ${run.tokens_output ?? 0}`;
+    document.getElementById('cost').textContent = fmtCost(run.cost_actual);
+    document.getElementById('times').textContent =
+      `${fmtTime(run.started_at)} → ${fmtTime(run.finished_at)}`;
+    document.getElementById('heartbeat').textContent = fmtTime(run.last_heartbeat);
+    document.getElementById('cancel-flag').textContent = run.cancel_requested ? '已请求取消' : '否';
+
+    const terminal = ['completed', 'partial_success', 'failed', 'timeout', 'cancelled'];
+    if (terminal.includes(run.status)) {
+      clearInterval(timer); timer = null;
+      document.getElementById('cancel-btn').disabled = true;
+      if (run.status === 'completed' || run.status === 'partial_success') {
+        document.getElementById('report-btn').disabled = false;
+      }
+    }
+  } catch (error) {
+    showError(`刷新状态失败：${error.message}`);
+  }
+}
+
+document.getElementById('cancel-btn').addEventListener('click', async () => {
+  try {
+    const result = await API.post(`/api/runs/${RUN_ID}/cancel`);
+    // 诚实提示粒度（计划第 710 行）
+    showInfo(result.note || '已请求取消');
+    await refresh();
+  } catch (error) {
+    showError(`取消失败：${error.message}`);
+  }
+});
+
+document.getElementById('report-btn').addEventListener('click', () => {
+  location.href = `/report/${RUN_ID}?project_id=${encodeURIComponent(PROJECT_ID)}`;
+});
+
+function showInfo(message) {
+  const box = document.getElementById('page-error');
+  box.className = 'banner banner-info';
+  box.textContent = message;
+  box.hidden = false;
+}
+
+document.getElementById('report-btn').disabled = false;
+refresh();
+timer = setInterval(refresh, 3000);
+</script>
+{% endblock %}

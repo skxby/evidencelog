@@ -71,6 +71,9 @@ class ValidatedInsight:
     removed_evidence_ids: list[str] = field(default_factory=list)
     #: 本条的处置说明（降级 / 裁剪原因）
     notes: list[str] = field(default_factory=list)
+    #: 附带的确定性诊断信息（命中的 analyzer、对应 runbook 等）。
+    #: 与模型输出无关，由流水线填入，落库到 `Insight.run_metadata`。
+    extras: dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_valid_evidence(self) -> bool:
@@ -88,6 +91,7 @@ class ValidatedInsight:
             "limitations": self.limitations,
             "removed_evidence_ids": list(self.removed_evidence_ids),
             "notes": list(self.notes),
+            "extras": dict(self.extras),
         }
 
 

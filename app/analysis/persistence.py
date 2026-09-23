@@ -86,6 +86,8 @@ def persist_insights(
             summary=item.summary,
             reasoning=item.reasoning,
             limitations=item.limitations,
+            # extras 只放 JSON 安全的确定性诊断信息（如 runbook 快照、命中的 analyzer）
+            run_metadata=dict(item.extras) if item.extras else None,
         )
         insight_repository.add(project_id, insight)
         # 需要 id 才能挂 Evidence，故先 flush 拿到自增 id

@@ -286,6 +286,7 @@ def analyze(
     pipeline_input: PipelineInput,
     *,
     analyzers: list[Any],
+    domain: Any = None,
     router: Any = None,
     context_budgets: Any = None,
     group_window_seconds: int = DEFAULT_GROUP_WINDOW_SECONDS,
@@ -338,6 +339,12 @@ def analyze(
     anomalies, detection_notes = run_detection(
         events, analyzers=analyzers, confirmed_knowledge=pipeline_input.confirmed_knowledge
     )
+
+    # 命中异常附对应 runbook（计划第 89、909 行：报告页只读展示处置步骤）。
+    # 放在这里而不是页面层：runbook 属领域资产，页面不该知道去哪找它。
+    attached = attach_runbooks(anomalies, domain=domain)
+    if attached:
+        detection_notes.append(f"{attached} 条异常附上了对应的 runbook")
 
     # ---- 事故归并（在检测之后：签名来自 analyzer）----
     signature_by_group: dict[int, str] = {}
@@ -592,6 +599,8 @@ def _run_model_analysis(
         result.notes.append(f"第 {round_index + 1} 轮证据校验未过，带反馈重试")
         prompt = f"{_build_prompt(context)}\n\n{feedback}"
 
+    # 把 runbook 快照挂到结论上，供报告页只读展示处置步骤（计划第 909 行）
+    attach_runbooks_to_insights(accepted, result.anomalies)
     result.insights = accepted
 
 
@@ -637,3 +646,65 @@ def _validate_candidates(raw: Any, valid_ids: set[str]) -> list[dict[str, Any]]:
             }
         )
     return out
+
+# ============================================================
+# runbook 挂接（计划第 89、412、909 行）
+# ============================================================
+
+
+def attach_runbooks(anomalies: list[dict[str, Any]], *, domain: Any) -> int:
+    """给命中 runbook 的异常挂上处置步骤（只读展示）。
+
+    返回挂上的条数。`domain` 为空或没有 runbook 时不做任何事——
+    runbook 是可选资产，缺了不该让分析失败。
+    """
+    if domain is None or not hasattr(domain, "find_runbook_for"):
+        return 0
+
+    attached = 0
+    for anomaly in anomalies:
+        book = domain.find_runbook_for(
+            str(anomaly.get("type", "")),
+            str(anomaly.get("message", "")),
+            anomaly.get("metric_name"),
+        )
+        if book is None:
+            continue
+        anomaly["runbook"] = {
+            "id": book.id,
+            "title": book.title,
+            "steps": list(book.steps),
+            "references": list(book.references),
+        }
+        attached += 1
+    return attached
+
+
+def runbook_by_analyzer(anomalies: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """按 analyzer 名索引已挂上的 runbook，供结论匹配使用。"""
+    return {
+        str(a.get("type")): a["runbook"]
+        for a in anomalies
+        if isinstance(a.get("runbook"), dict)
+    }
+
+
+def attach_runbooks_to_insights(
+    insights: list[Any], anomalies: list[dict[str, Any]]
+) -> None:
+    """把 runbook 与命中的 analyzer 一并写进 Insight 的 extras。
+
+    为什么挂在 extras 而不是单独建表：runbook 是**领域代码资产**（随目录包进
+    Git），不是运行数据；把它的内容复制进库会让"改了 YAML 但历史报告还是旧步骤"。
+    这里只存一份**当时的快照**用于展示，来源仍以领域目录为准。
+    """
+    books = runbook_by_analyzer(anomalies)
+    if not books:
+        return
+    for insight in insights:
+        extras = getattr(insight, "extras", None)
+        if extras is None:
+            continue
+        # 结论与异常没有强绑定关系（模型可能归纳多条异常），
+        # 故把所有命中的 runbook 都附上，由页面展示为"相关处置步骤"。
+        extras["runbooks"] = list(books.values())

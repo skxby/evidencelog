@@ -1,0 +1,166 @@
+/* 最简前端样式：无构建工具，纯手写 CSS。
+   目标不是"好看"，而是**信息密度高且状态一眼可辨**——
+   这是个排障工具，四层语义的着色与"结果不完整"的提示必须显著。 */
+
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1e222b;
+  --border: #2a2f3a;
+  --text: #e6e9ef;
+  --muted: #9aa3b2;
+  --accent: #4c8dff;
+
+  /* 四层语义（计划第 833-836 / 907 行）：✓ 确认 / → 推测 / ? 可能 / − 未知 */
+  --fact: #3ddc84;
+  --inference: #4c8dff;
+  --possibility: #f5a623;
+  --unknown: #9aa3b2;
+
+  --danger: #ff5c5c;
+  --warn: #f5a623;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code, pre, .mono {
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+  font-size: 12.5px;
+}
+
+/* ---------- 布局 ---------- */
+
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 20px; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 600; color: var(--text); }
+.nav { display: flex; gap: 14px; align-items: center; }
+
+.container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px; margin-bottom: 16px;
+}
+.card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+.card h3 { margin: 16px 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.spread { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.muted { color: var(--muted); }
+.small { font-size: 12.5px; }
+.mt { margin-top: 12px; }
+
+/* ---------- 表单 ---------- */
+
+input, select, textarea, button {
+  font: inherit; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 7px 10px;
+}
+input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); }
+
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.primary:hover { filter: brightness(1.08); }
+button.danger { border-color: var(--danger); color: var(--danger); }
+button.link { background: none; border: none; color: var(--accent); padding: 0; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+
+label { display: block; margin-bottom: 10px; }
+label > span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12.5px; }
+label input, label select { width: 100%; }
+
+/* ---------- 提示与状态 ---------- */
+
+.banner {
+  padding: 11px 14px; border-radius: 7px; margin-bottom: 14px;
+  border: 1px solid transparent; font-size: 13px;
+}
+.banner-error { background: #2a1618; border-color: #5c2a2f; color: #ffb3b3; }
+.banner-warn { background: #2a2416; border-color: #5c4a2a; color: #ffd88a; }
+.banner-info { background: #16202a; border-color: #2a455c; color: #a8d3ff; }
+.banner strong { display: block; margin-bottom: 3px; }
+
+.pill {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--muted);
+}
+.pill-high { color: #ffb3b3; border-color: #5c2a2f; background: #2a1618; }
+.pill-medium { color: #ffd88a; border-color: #5c4a2a; background: #2a2416; }
+.pill-low { color: #b9c4d4; }
+.pill-ok { color: #9ff0c4; border-color: #245c3d; background: #14291f; }
+.pill-bad { color: #ffb3b3; border-color: #5c2a2f; background: #2a1618; }
+.pill-run { color: #a8d3ff; border-color: #2a455c; background: #16202a; }
+
+/* ---------- 四层语义（报告页核心） ---------- */
+
+.insight {
+  border: 1px solid var(--border); border-left-width: 4px;
+  border-radius: 6px; padding: 12px 14px; margin-bottom: 10px;
+  background: var(--panel-2);
+}
+.insight-fact { border-left-color: var(--fact); }
+.insight-inference { border-left-color: var(--inference); }
+.insight-possibility { border-left-color: var(--possibility); }
+.insight-unknown { border-left-color: var(--unknown); }
+
+.semantic {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-weight: 700; font-size: 12px; margin-right: 8px;
+}
+.semantic-fact { color: var(--fact); }
+.semantic-inference { color: var(--inference); }
+.semantic-possibility { color: var(--possibility); }
+.semantic-unknown { color: var(--unknown); }
+
+.insight-title { font-weight: 600; }
+.insight-summary { margin: 6px 0; color: #cfd6e2; }
+.insight-extra { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--border); }
+.insight-extra .label { color: var(--muted); font-size: 12px; }
+
+details.evidence { margin-top: 8px; }
+details.evidence > summary { cursor: pointer; color: var(--accent); font-size: 12.5px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; }
+
+/* ---------- Runbook ---------- */
+
+.runbook { background: #141a16; border: 1px solid #24503a; border-radius: 6px; padding: 10px 12px; margin-top: 8px; }
+.runbook h4 { margin: 0 0 6px; font-size: 12.5px; color: #9ff0c4; }
+.runbook ol { margin: 0; padding-left: 20px; }
+.runbook li { margin-bottom: 3px; }
+.runbook .readonly { color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+
+/* ---------- 阶段进度 ---------- */
+
+.phases { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.phase {
+  padding: 3px 9px; border-radius: 4px; font-size: 11.5px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+}
+.phase-done { color: #9ff0c4; border-color: #245c3d; }
+.phase-current { color: #a8d3ff; border-color: var(--accent); }
+.phase-skipped { text-decoration: line-through; opacity: .7; }
+
+.list-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px;
+  margin-bottom: 8px; background: var(--panel-2);
+}
+.empty { color: var(--muted); padding: 14px 0; text-align: center; }

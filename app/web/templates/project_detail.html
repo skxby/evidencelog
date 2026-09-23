@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}项目详情{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="spread">
+    <h2 id="project-title">项目 #{{ project_id }}</h2>
+    <a class="small" href="/knowledge/{{ project_id }}">待确认知识 →</a>
+  </div>
+  <div id="project-meta" class="muted small"></div>
+</div>
+
+<div class="card">
+  <h2>① 上传日志</h2>
+  <div class="row">
+    <input type="file" id="file" style="flex:2;min-width:240px">
+    <select id="format" style="width:120px">
+      <option value="txt">txt</option>
+      <option value="jsonl">jsonl</option>
+    </select>
+    <button class="primary" id="upload-btn">上传并解析</button>
+  </div>
+  <p class="muted small">
+    上传后**先脱敏再落盘**：磁盘上只有脱敏后的版本，原文不持久化。
+  </p>
+  <div id="upload-result" class="mt"></div>
+</div>
+
+<div class="card">
+  <h2>② 发起分析</h2>
+  <div class="row">
+    <select id="data-source" style="flex:2;min-width:240px"></select>
+    <button class="primary" id="analyze-btn">开始分析</button>
+  </div>
+  <div class="row mt">
+    <label style="flex:1;margin:0">
+      <span>起始时间（可空）</span>
+      <input type="datetime-local" id="time-start">
+    </label>
+    <label style="flex:1;margin:0">
+      <span>结束时间（可空）</span>
+      <input type="datetime-local" id="time-end">
+    </label>
+  </div>
+  <div id="analyze-result" class="mt"></div>
+</div>
+
+<div class="card">
+  <h2>③ 分析记录</h2>
+  <div id="runs"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PROJECT_ID = {{ project_id }};
+
+async function loadProject() {
+  try {
+    const projects = await API.get('/api/projects');
+    const project = projects.find((p) => p.id === PROJECT_ID);
+    if (!project) { showError('项目不存在或不属于你'); return; }
+    document.getElementById('project-title').textContent = project.name;
+    document.getElementById('project-meta').textContent =
+      `预算 ${fmtCost(project.budget_total)} · 已用 ${fmtCost(project.budget_used)} · 状态 ${project.status}`;
+  } catch (error) {
+    showError(`加载项目失败：${error.message}`);
+  }
+}
+
+async function loadDataSources() {
+  const select = document.getElementById('data-source');
+  select.textContent = '';
+  try {
+    const sources = await API.get(`/api/projects/${PROJECT_ID}/data-sources`);
+    if (!sources.length) {
+      select.appendChild(el('option', { value: '', text: '（还没有数据源，先上传一个文件）' }));
+      return;
+    }
+    for (const source of sources) {
+      select.appendChild(el('option', {
+        value: source.id,
+        text: `#${source.id} ${source.format} · ${source.location || '(无位置)'}`,
+      }));
+    }
+  } catch (error) {
+    showError(`加载数据源失败：${error.message}`);
+  }
+}
+
+function renderUploadResult(result) {
+  const box = document.getElementById('upload-result');
+  box.textContent = '';
+  const stats = result.parse || {};
+  const mask = result.mask || {};
+
+  box.appendChild(el('div', { class: 'banner banner-info' }, [
+    el('strong', { text: `解析完成：入库 ${result.events_persisted} 条事件` }),
+    el('div', { class: 'small', text:
+      `总行 ${stats.total_lines ?? '—'} · 成功 ${stats.parsed ?? '—'} · 坏行 ${stats.bad_lines ?? '—'}`
+      + ` · 跳过 ${stats.skipped ?? '—'} · 合并 ${stats.merged ?? '—'}` }),
+    el('div', { class: 'small', text: `脱敏替换 ${mask.total ?? 0} 处 ${JSON.stringify(mask.by_rule || {})}` }),
+    el('div', { class: 'small muted', text:
+      `数据源 #${result.data_source_id}（${result.created_data_source ? '新建' : '复用'}）· 落盘文件 ${result.stored_filename}` }),
+  ]));
+
+  // 坏行必须能看见（不静默），并给出样本
+  if (stats.bad_lines) {
+    const samples = (stats.bad_line_samples || []).slice(0, 5);
+    box.appendChild(el('div', { class: 'banner banner-warn' }, [
+      el('strong', { text: `有 ${stats.bad_lines} 行未能解析（未静默丢弃）` }),
+      el('div', { class: 'small', text: `坏行率 ${stats.bad_line_rate ?? '—'}` }),
+      samples.length ? el('pre', { class: 'mono', text: samples.join('\n') }) : null,
+    ]));
+  }
+}
+
+document.getElementById('upload-btn').addEventListener('click', async () => {
+  clearError();
+  const input = document.getElementById('file');
+  if (!input.files.length) { showError('请选择一个文件'); return; }
+
+  const form = new FormData();
+  form.append('file', input.files[0]);
+  form.append('fmt', document.getElementById('format').value);
+
+  const button = document.getElementById('upload-btn');
+  button.disabled = true;
+  try {
+    const result = await API.upload(`/api/projects/${PROJECT_ID}/upload`, form);
+    renderUploadResult(result);
+    await loadDataSources();
+  } catch (error) {
+    showError(`上传失败：${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+function toIso(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return isNaN(date) ? null : date.toISOString();
+}
+
+document.getElementById('analyze-btn').addEventListener('click', async () => {
+  clearError();
+  const sourceId = Number(document.getElementById('data-source').value || 0);
+  if (!sourceId) { showError('请先上传日志或选择一个数据源'); return; }
+
+  const payload = { data_source_id: sourceId };
+  const start = toIso(document.getElementById('time-start').value);
+  const end = toIso(document.getElementById('time-end').value);
+  if (start || end) { payload.time_range = { start, end }; }
+
+  const button = document.getElementById('analyze-btn');
+  button.disabled = true;
+  try {
+    const result = await API.post(`/api/projects/${PROJECT_ID}/analysis-runs`, payload);
+    const box = document.getElementById('analyze-result');
+    box.textContent = '';
+    box.appendChild(el('div', { class: 'banner banner-info' }, [
+      el('strong', { text: result.reused ? '复用了已有分析结果' : '分析已进入队列' }),
+      el('div', { class: 'small' },
+        [el('a', { href: `/runs/${result.run_id}?project_id=${PROJECT_ID}`, text: `查看 Run #${result.run_id} 状态 →` })]),
+    ]));
+    await loadRuns();
+  } catch (error) {
+    showError(`发起分析失败：${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+async function loadRuns() {
+  const container = document.getElementById('runs');
+  container.textContent = '';
+  // 没有"列出项目下所有 Run"的端点，这里用 GET /api/runs/{id} 逐个查不现实；
+  // V1 的做法是刚创建的 Run 直接跳状态页，这里只放最近一次操作的入口。
+  container.appendChild(el('div', { class: 'empty',
+    text: '发起分析后，从上方的链接进入 Run 状态页；状态页会显示阶段进度与成本。' }));
+}
+
+loadProject();
+loadDataSources();
+loadRuns();
+</script>
+{% endblock %}

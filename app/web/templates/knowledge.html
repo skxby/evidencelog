@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}待确认知识{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="spread">
+    <h2>待确认知识 · 项目 #{{ project_id }}</h2>
+    <a class="small" href="/projects/{{ project_id }}">← 回到项目</a>
+  </div>
+  <p class="muted small">
+    候选来自分析过程中的模型产出，**在人工确认前不参与任何自动结论**。
+    确认后会写入数据卷的 <code>confirmed/</code>，下次分析自动加载。
+  </p>
+</div>
+
+<div class="card">
+  <h2>候选（staging）</h2>
+  <div id="candidates"></div>
+</div>
+
+<div class="card">
+  <h2>已生效（confirmed）</h2>
+  <div id="confirmed"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PROJECT_ID = {{ project_id }};
+
+function renderCandidate(candidate) {
+  const node = el('div', { class: 'list-item' });
+  const info = el('div', {});
+  info.appendChild(el('div', {}, [
+    el('strong', { text: candidate.title }),
+    el('span', { class: 'muted small', text: `　${candidate.kind} · 置信度 ${(candidate.confidence ?? 0).toFixed(2)}` }),
+  ]));
+  if (candidate.description) {
+    info.appendChild(el('div', { class: 'muted small', text: candidate.description }));
+  }
+  const evidence = candidate.evidence || {};
+  info.appendChild(el('div', { class: 'muted small mono', text:
+    `证据：run ${evidence.run_id || '—'} · 事件 ${(evidence.event_ids || []).join(', ') || '—'}` }));
+  if (candidate.match && Object.keys(candidate.match).length) {
+    info.appendChild(el('div', { class: 'muted small mono', text:
+      `命中条件：${JSON.stringify(candidate.match)}` }));
+  }
+
+  const actions = el('div', { class: 'row' });
+  const finish = (label) => {
+    node.style.opacity = '.5';
+    actions.textContent = '';
+    actions.appendChild(el('span', { class: 'pill pill-ok', text: label }));
+  };
+  const call = async (path, label, body) => {
+    try {
+      await API.post(path, body);
+      finish(label);
+    } catch (error) {
+      showError(`${label}失败：${error.message}`);
+    }
+  };
+  const base = `/api/knowledge/candidates/${candidate.id}`;
+  const q = `?project_id=${encodeURIComponent(PROJECT_ID)}`;
+
+  actions.appendChild(el('button', { class: 'primary', text: '确认',
+    onclick: () => call(`${base}/confirm${q}`, '已确认') }));
+  actions.appendChild(el('button', { text: '编辑标题', onclick: async () => {
+    const title = prompt('新的标题', candidate.title);
+    if (title === null) return;
+    try {
+      await API.patch(`${base}${q}`, { title });
+      candidate.title = title;
+      showError('已保存，请再点「确认」使其生效');
+    } catch (error) {
+      showError(`编辑失败：${error.message}`);
+    }
+  } }));
+  actions.appendChild(el('button', { text: '这其实不是问题',
+    onclick: () => call(`${base}/false-positive${q}`, '已记为误报') }));
+  actions.appendChild(el('button', { class: 'danger', text: '丢弃',
+    onclick: () => call(`${base}/reject${q}`, '已丢弃') }));
+
+  node.appendChild(info);
+  node.appendChild(actions);
+  return node;
+}
+
+async function load() {
+  try {
+    const candidates = await API.get(`/api/projects/${PROJECT_ID}/knowledge/candidates`);
+    const box = document.getElementById('candidates');
+    box.textContent = '';
+    if (!candidates.length) {
+      box.appendChild(el('div', { class: 'empty', text: '暂无候选。' }));
+    } else {
+      for (const candidate of candidates) box.appendChild(renderCandidate(candidate));
+    }
+  } catch (error) {
+    showError(`加载候选失败：${error.message}`);
+  }
+
+  try {
+    const confirmed = await API.get(`/api/projects/${PROJECT_ID}/knowledge/confirmed`);
+    const box = document.getElementById('confirmed');
+    box.textContent = '';
+    if (!confirmed.length) {
+      box.appendChild(el('div', { class: 'empty', text:
+        '还没有已生效知识。领域自带的 seed 知识放在领域目录包里（见 knowledge/confirmed/README.md）。' }));
+    } else {
+      const table = el('table');
+      table.appendChild(el('tr', {}, [
+        el('th', { text: 'id' }), el('th', { text: '类型' }),
+        el('th', { text: '标题' }), el('th', { text: '置信度' }),
+      ]));
+      for (const item of confirmed) {
+        table.appendChild(el('tr', {}, [
+          el('td', { class: 'mono', text: item.id }),
+          el('td', { text: item.kind }),
+          el('td', { text: item.title }),
+          el('td', { text: (item.confidence ?? 0).toFixed(2) }),
+        ]));
+      }
+      box.appendChild(table);
+    }
+  } catch (error) {
+    showError(`加载已生效知识失败：${error.message}`);
+  }
+}
+
+load();
+</script>
+{% endblock %}

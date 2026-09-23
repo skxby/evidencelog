@@ -161,6 +161,8 @@ class InsightResponse(StrictModel):
     summary: str
     reasoning: str | None = None
     limitations: str | None = None
+    # 确定性诊断信息（命中的 analyzer、runbook 快照等）
+    run_metadata: dict[str, Any] | None = None
     created_at: datetime
 
 

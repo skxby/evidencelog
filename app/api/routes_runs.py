@@ -285,6 +285,7 @@ def _insight_response(insight: Insight) -> InsightResponse:
         summary=insight.summary,
         reasoning=insight.reasoning,
         limitations=insight.limitations,
+        run_metadata=insight.run_metadata,
         created_at=insight.created_at,
     )
 
