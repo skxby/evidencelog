@@ -449,3 +449,77 @@ def test_heartbeat_is_updated_during_execution(session, ctx):
 
     stored = runs.get(project.id, run_id)
     assert stored.last_heartbeat is not None, "执行期必须写心跳，否则僵尸回收无从判断"
+
+# ============================================================
+# 回归：Worker 任务必须自己提交它改的东西
+# ============================================================
+
+
+def test_worker_task_commits_its_own_changes(session, ctx):
+    """`_execute` 必须 commit，不能只 flush。
+
+    这是被"真起全栈跑一遍"逼出来的 bug：任务自己管会话（不像 HTTP 路由由
+    get_db 依赖负责提交），只 flush 的话 `session.close()` 会把状态机结果、
+    回填的 token/成本、落库的结论与证据**全部回滚**，Run 永远停在 queued。
+    而返回值仍然是对的 —— "任务报告成功"与"库里没变"能同时成立，所以
+    只测函数返回值是发现不了的。
+
+    本测试刻意从一个**独立会话**复查，模拟真实的跨进程可见性问题。
+    """
+    from unittest.mock import patch
+
+    from sqlalchemy import text as _text
+
+    from app.db import SessionLocal
+    from app.tasks.analysis import _execute
+
+    # 需要一个完整可用的 project（含 user），用现有 ctx 的项目
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    session.commit()
+
+    class _FakeSettings:
+        model_provider_base_url = "https://example.invalid"
+        secret_key = "test-secret"
+        default_timezone = "Asia/Shanghai"
+        data_dir = "./data"
+        model_l1 = model_l2 = model_l3 = "test-model"
+        model_l1_reasoning = model_l2_reasoning = model_l3_reasoning = "off"
+        model_l1_price_input_per_1m = model_l1_price_output_per_1m = 1.0
+        model_l2_price_input_per_1m = model_l2_price_output_per_1m = 1.0
+        model_l3_price_input_per_1m = model_l3_price_output_per_1m = 1.0
+
+    # 让模型调用必然失败：走"降级到纯规则报告"这条路径（partial_success）
+    def _boom(*args, **kwargs):
+        raise RuntimeError("模型不可达（测试桩）")
+
+    with patch("app.config.get_settings", return_value=_FakeSettings()), patch(
+        "app.gateways.router.build_router", side_effect=_boom
+    ):
+        out = _execute(
+            session_factory=SessionLocal,
+            run_id=run_id,
+            project_id=project.id,
+            start_tier="L2",
+        )
+
+    assert out["run_id"] == run_id
+
+    # 关键断言：换一个会话读，状态必须已经落库
+    fresh = SessionLocal()
+    try:
+        status = fresh.execute(
+            _text("SELECT status FROM agent_runs WHERE id = :i"), {"i": run_id}
+        ).scalar_one()
+        metadata = fresh.execute(
+            _text("SELECT run_metadata FROM agent_runs WHERE id = :i"), {"i": run_id}
+        ).scalar_one()
+    finally:
+        fresh.close()
+
+    assert status != enums.AGENT_RUN_QUEUED, (
+        f"Worker 报告了 {out['status']}，但库里仍是 {status} —— 说明任务没有提交"
+    )
+    assert status in (enums.AGENT_RUN_PARTIAL_SUCCESS, enums.AGENT_RUN_FAILED)
+    if status == enums.AGENT_RUN_PARTIAL_SUCCESS:
+        assert metadata and metadata.get("stop_reason") == "model_unavailable"

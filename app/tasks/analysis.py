@@ -170,7 +170,14 @@ def _execute(*, session_factory, run_id: int, project_id: int, start_tier: str) 
             )
             run.cost_actual = sum(float(a.get("cost") or 0) for a in result.model_attempts)
 
-        session.flush()
+        # 提交！这一步绝不能只 flush。
+        #
+        # 这个任务**自己管会话**（不像 HTTP 路由那样由 get_db 依赖负责提交），
+        # 只 flush 的话 `session.close()` 会把整段执行结果回滚掉：状态机算出的
+        # completed/partial_success/failed、回填的 token 与成本、落库的
+        # Insight 与 Evidence，**全部消失**，Run 永远停在 queued。
+        # 更阴险的是返回值仍然是对的 —— "任务报告成功"与"库里没变"能同时成立。
+        session.commit()
         return {
             "run_id": run_id,
             "status": outcome.status,
