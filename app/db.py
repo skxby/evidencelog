@@ -29,9 +29,23 @@ class Base(DeclarativeBase):
 
 
 def get_db() -> Generator[Session, None, None]:
-    """FastAPI 依赖注入用的会话工厂。"""
+    """FastAPI 依赖注入用的会话工厂。
+
+    **请求成功即提交，异常即回滚。**
+
+    为什么必须在这里 commit：路由函数只 `flush()`（为了让自增 id 立刻可用），
+    若依赖退出时只 `close()`，事务会被丢弃 —— 下一个请求在**新会话**里读不到
+    刚写入的数据（表现为"注册成功但立刻 401"），而且这个错误只在跨请求时
+    才暴露，单会话测试根本发现不了。
+
+    回滚是刻意的：请求中途失败时不要把半截写入留在库里。
+    """
     db = SessionLocal()
     try:
         yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

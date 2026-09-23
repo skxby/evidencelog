@@ -17,7 +17,7 @@ celery_app = Celery(
     "logagent",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.health"],
+    include=["app.tasks.health", "app.tasks.analysis"],
 )
 
 celery_app.conf.update(

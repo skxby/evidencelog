@@ -1,7 +1,7 @@
 """FastAPI 入口。
 
-阶段 01 只做两件事：证明服务能起来、证明它真的连得上 PostgreSQL 与 Redis。
-分析逻辑一行都没有，那是阶段 09 的事。
+阶段 10 起：业务端点走 `app/api/` 下的路由模块；API 只做验证、鉴权、
+创建任务、返回状态，**不承担分析逻辑**（计划第 856 行）。
 """
 
 from fastapi import FastAPI
@@ -9,12 +9,23 @@ from fastapi.responses import JSONResponse
 from redis import Redis
 from sqlalchemy import text
 
+from app.api.routes_auth_projects import router as auth_projects_router
+from app.api.routes_knowledge import router as knowledge_router
+from app.api.routes_runs import router as runs_router
 from app.config import get_settings
 from app.db import engine
 
 settings = get_settings()
 
-app = FastAPI(title="Log Intelligence Agent", version="0.1.0")
+app = FastAPI(
+    title="Log Intelligence Agent",
+    version="0.1.0",
+    description="个人全栈、单领域、只读的日志分析 Agent Runtime（V1）",
+)
+
+app.include_router(auth_projects_router)
+app.include_router(runs_router)
+app.include_router(knowledge_router)
 
 
 @app.get("/healthz")

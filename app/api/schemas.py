@@ -1,0 +1,220 @@
+"""API 请求 / 响应模型（Pydantic）。
+
+**参数校验放在这里**（阶段 10 验收第 1 条）：进入业务代码之前，形状与取值
+范围就已经被约束。特别注意：
+
+- 时间必须带时区 —— 与阶段 04/07/08 同一条理由（naive 时间会让时间窗口与
+  幂等键悄悄错位）；
+- `time_range` 的 start 不能晚于 end；
+- 未知字段一律拒绝（`extra="forbid"`），避免前端拼错字段名却"看起来成功了"。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.gateways.base import MODEL_TIERS
+
+
+def _require_tz(value: datetime | None, *, field: str) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        raise ValueError(f"{field} 必须带时区（如 2026-09-23T12:00:00+08:00）")
+    return value.astimezone(timezone.utc)
+
+
+class StrictModel(BaseModel):
+    """未知字段直接拒绝，避免拼错字段名却被静默忽略。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# ============================================================
+# 鉴权
+# ============================================================
+
+
+class RegisterRequest(StrictModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=72)
+
+
+class LoginRequest(StrictModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=72)
+
+
+class TokenResponse(StrictModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+
+
+# ============================================================
+# Project / DataSource
+# ============================================================
+
+
+class CreateProjectRequest(StrictModel):
+    name: str = Field(min_length=1, max_length=200)
+    budget_total: float = Field(default=0.0, ge=0)
+
+
+class ProjectResponse(StrictModel):
+    id: int
+    name: str
+    status: str
+    budget_total: float
+    budget_used: float
+
+
+class CreateDataSourceRequest(StrictModel):
+    type: str = Field(default="file_upload", min_length=1, max_length=32)
+    format: Literal["txt", "jsonl"]
+    location: str = Field(default="", max_length=1024)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DataSourceResponse(StrictModel):
+    id: int
+    project_id: int
+    type: str
+    format: str
+    location: str
+    status: str
+
+
+# ============================================================
+# 分析
+# ============================================================
+
+
+class TimeRange(StrictModel):
+    start: datetime | None = None
+    end: datetime | None = None
+
+    @field_validator("start", "end")
+    @classmethod
+    def _tz_required(cls, value: datetime | None, info: Any) -> datetime | None:
+        return _require_tz(value, field=info.field_name)
+
+    @model_validator(mode="after")
+    def _order(self) -> TimeRange:
+        if self.start and self.end and self.start > self.end:
+            raise ValueError("time_range.start 不能晚于 time_range.end")
+        return self
+
+
+class RunFilters(StrictModel):
+    severity: list[Literal["high", "medium", "low"]] | None = None
+    event_type: list[Literal["log", "metric"]] | None = None
+    keyword: str | None = Field(default=None, max_length=200)
+
+
+class CreateRunRequest(StrictModel):
+    data_source_id: int = Field(ge=1)
+    time_range: TimeRange | None = None
+    filters: RunFilters | None = None
+    #: 可选：指定起始等级。不传则由复杂度评估决定（正常路径）。
+    start_tier: Literal["L1", "L2", "L3"] | None = None
+
+
+class CreateRunResponse(StrictModel):
+    """计划第 867 行：创建分析**立即返回** `run_id + queued`。"""
+
+    run_id: int
+    status: str
+    reused: bool = False
+
+
+class RunResponse(StrictModel):
+    """计划第 868 行：状态、进度、成本。"""
+
+    id: int
+    project_id: int
+    status: str
+    current_phase: str | None = None
+    phase_history: list[dict[str, Any]] | None = None
+    tokens_input: int
+    tokens_output: int
+    cost_actual: float
+    error: str | None = None
+    run_metadata: dict[str, Any] | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    last_heartbeat: datetime | None = None
+    cancel_requested: bool = False
+
+
+class InsightResponse(StrictModel):
+    id: int
+    project_id: int
+    run_id: int
+    incident_id: int | None = None
+    type: str
+    severity: str
+    confidence: float
+    title: str
+    summary: str
+    reasoning: str | None = None
+    limitations: str | None = None
+    created_at: datetime
+
+
+class EvidenceResponse(StrictModel):
+    id: int
+    insight_id: int
+    source_id: int | None = None
+    event_ids: list[Any] | None = None
+    time_range: dict[str, Any] | None = None
+    calculation: str | None = None
+    description: str
+
+
+class UploadResponse(StrictModel):
+    data_source_id: int
+    created_data_source: bool
+    format: str
+    stored_filename: str
+    events_persisted: int
+    parse: dict[str, Any]
+    mask: dict[str, Any]
+
+
+# ============================================================
+# 知识审核
+# ============================================================
+
+
+class KnowledgeCandidateResponse(StrictModel):
+    id: str
+    kind: str
+    title: str
+    description: str = ""
+    match: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 0.0
+    status: str = "draft"
+
+
+class EditCandidateRequest(StrictModel):
+    """编辑后再确认（计划第 878 行）。只允许改这几项。"""
+
+    title: str | None = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=2000)
+    match: dict[str, Any] | None = None
+    severity_hint: Literal["high", "medium", "low"] | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class KnowledgeActionResponse(StrictModel):
+    candidate_id: str
+    action: str
+    status: str
+
+
+def tier_choices() -> tuple[str, ...]:
+    return MODEL_TIERS

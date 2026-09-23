@@ -1,0 +1,622 @@
+"""阶段 10 验收的集成测试（真实 PostgreSQL + FastAPI TestClient）。
+
+验收四条：
+  1. 每个端点鉴权与参数校验生效
+  2. 分析端点立即返回、不阻塞
+  3. 接口文档 /docs 可访问
+  4. 跨 Project 访问被拒绝
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from unittest.mock import patch
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+
+from app.db import SessionLocal, engine
+from app.main import app
+
+pytestmark = pytest.mark.integration
+UTC = timezone.utc
+
+
+@pytest.fixture()
+def client():
+    with TestClient(app) as c:
+        yield c
+
+
+def _email() -> str:
+    return f"api-{datetime.now(UTC).timestamp()}@example.com"
+
+
+def _register(client: TestClient, password: str = "strong-password") -> dict:
+    """注册一个新账号并返回 Authorization 头。"""
+    email = _email()
+    response = client.post("/api/register", json={"email": email, "password": password})
+    assert response.status_code == 200, response.text
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}", "email": email}
+
+
+def _auth_headers_fresh_user(client: TestClient) -> dict:
+    return _register(client)
+
+
+@pytest.fixture(autouse=True)
+def _cleanup():
+    """测试产生的数据在结束时清掉，避免污染开发库。"""
+    yield
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM evidences WHERE insight_id IN (SELECT id FROM insights WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'apitest-%'))"))
+        conn.execute(text("DELETE FROM insights WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'apitest-%')"))
+        conn.execute(text("DELETE FROM events WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'apitest-%')"))
+        conn.execute(text("DELETE FROM agent_runs WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'apitest-%')"))
+        conn.execute(text("DELETE FROM data_sources WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'apitest-%')"))
+        conn.execute(text("DELETE FROM projects WHERE name LIKE 'apitest-%'"))
+        conn.execute(text("DELETE FROM users WHERE email LIKE 'api-%@example.com'"))
+
+
+def _make_project(client: TestClient, headers: dict, name: str | None = None) -> int:
+    response = client.post(
+        "/api/projects",
+        json={"name": name or f"apitest-{datetime.now(UTC).timestamp()}"},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+# ============================================================
+# 验收 1：鉴权生效
+# ============================================================
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/api/projects"),
+        ("post", "/api/projects"),
+        ("get", "/api/runs/1"),
+        ("post", "/api/runs/1/cancel"),
+        ("get", "/api/insights/1"),
+        ("get", "/api/insights/1/evidence"),
+        ("get", "/api/me"),
+        ("get", "/api/projects/1/data-sources"),
+        ("get", "/api/projects/1/knowledge/candidates"),
+        ("get", "/api/projects/1/knowledge/confirmed"),
+    ],
+)
+def test_endpoints_require_authentication(client: TestClient, method: str, path: str):
+    """验收：每个端点鉴权生效 —— 无令牌一律 401。"""
+    response = getattr(client, method)(path)
+    assert response.status_code == 401, f"{method.upper()} {path} 未鉴权却返回 {response.status_code}"
+
+
+def test_invalid_token_is_rejected(client: TestClient):
+    response = client.get(
+        "/api/projects", headers={"Authorization": "Bearer not-a-real-token"}
+    )
+    assert response.status_code == 401
+
+
+def test_malformed_authorization_header_is_rejected(client: TestClient):
+    for header in ("Token abc", "Bearer", "Bearer ", "abc"):
+        response = client.get("/api/projects", headers={"Authorization": header})
+        assert response.status_code == 401, header
+
+
+def test_token_for_deleted_user_is_rejected(client: TestClient):
+    headers = _register(client)
+    # 令牌本身合法，但用户被删掉后应当拒绝
+    with SessionLocal() as session:
+        session.execute(
+            text("DELETE FROM users WHERE email = :e"), {"e": headers["email"]}
+        )
+        session.commit()
+    response = client.get("/api/projects", headers=headers)
+    assert response.status_code == 401
+
+
+def test_valid_token_grants_access(client: TestClient):
+    headers = _register(client)
+    assert client.get("/api/me", headers=headers).status_code == 200
+    assert client.get("/api/projects", headers=headers).status_code == 200
+
+
+def test_register_rejects_duplicate_email(client: TestClient):
+    headers = _register(client)
+    response = client.post(
+        "/api/register", json={"email": headers["email"], "password": "another-password"}
+    )
+    assert response.status_code == 409
+
+
+def test_login_with_wrong_password_is_rejected(client: TestClient):
+    headers = _register(client, password="correct-password")
+    response = client.post(
+        "/api/login", json={"email": headers["email"], "password": "wrong-password"}
+    )
+    assert response.status_code == 401
+    # 不区分"用户不存在"与"口令不对"
+    response2 = client.post(
+        "/api/login", json={"email": "nobody@example.com", "password": "whatever123"}
+    )
+    assert response2.status_code == 401
+    assert response.json()["detail"] == response2.json()["detail"]
+
+
+def test_login_sets_httponly_cookie(client: TestClient):
+    """计划第 858 行：token 存 httpOnly Cookie。"""
+    headers = _register(client, password="correct-password")
+    response = client.post(
+        "/api/login", json={"email": headers["email"], "password": "correct-password"}
+    )
+    assert response.status_code == 200
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "access_token=" in set_cookie
+    assert "HttpOnly" in set_cookie
+
+
+# ============================================================
+# 验收 1（续）：参数校验生效
+# ============================================================
+
+
+def test_register_rejects_short_password(client: TestClient):
+    response = client.post(
+        "/api/register", json={"email": _email(), "password": "short"}
+    )
+    assert response.status_code == 422
+
+
+def test_unknown_fields_are_rejected(client: TestClient):
+    """extra="forbid"：拼错字段名不该被静默忽略。"""
+    response = client.post(
+        "/api/register",
+        json={"email": _email(), "password": "strong-password", "typo_field": 1},
+    )
+    assert response.status_code == 422
+
+
+def test_create_project_rejects_empty_name(client: TestClient):
+    headers = _register(client)
+    response = client.post("/api/projects", json={"name": ""}, headers=headers)
+    assert response.status_code == 422
+
+
+def test_create_project_rejects_negative_budget(client: TestClient):
+    headers = _register(client)
+    response = client.post(
+        "/api/projects", json={"name": "apitest-x", "budget_total": -5}, headers=headers
+    )
+    assert response.status_code == 422
+
+
+def test_data_source_rejects_unsupported_format(client: TestClient):
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    response = client.post(
+        f"/api/projects/{project_id}/data-sources",
+        json={"format": "csv"},
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+def test_run_request_rejects_naive_datetime(client: TestClient):
+    """naive 时间会让时间窗口与幂等键悄悄错位，必须拒绝。"""
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    response = client.post(
+        f"/api/projects/{project_id}/analysis-runs",
+        json={
+            "data_source_id": 1,
+            "time_range": {"start": "2026-09-23T12:00:00", "end": "2026-09-23T13:00:00"},
+        },
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+def test_run_request_rejects_inverted_time_range(client: TestClient):
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    response = client.post(
+        f"/api/projects/{project_id}/analysis-runs",
+        json={
+            "data_source_id": 1,
+            "time_range": {
+                "start": "2026-09-23T13:00:00+00:00",
+                "end": "2026-09-23T12:00:00+00:00",
+            },
+        },
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+def test_run_request_rejects_bad_severity_value(client: TestClient):
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    response = client.post(
+        f"/api/projects/{project_id}/analysis-runs",
+        json={"data_source_id": 1, "filters": {"severity": ["critical"]}},
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+def test_run_request_rejects_bad_tier(client: TestClient):
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    response = client.post(
+        f"/api/projects/{project_id}/analysis-runs",
+        json={"data_source_id": 1, "start_tier": "L9"},
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+# ============================================================
+# 验收 3：/docs 可访问
+# ============================================================
+
+
+def test_docs_is_accessible(client: TestClient):
+    assert client.get("/docs").status_code == 200
+    assert client.get("/openapi.json").status_code == 200
+
+
+def test_openapi_lists_the_planned_endpoints(client: TestClient):
+    """对照计划第 860–881 行的端点清单。"""
+    paths = set(client.get("/openapi.json").json()["paths"])
+    expected = {
+        "/api/register",
+        "/api/login",
+        "/api/projects",
+        "/api/projects/{project_id}/data-sources",
+        "/api/projects/{project_id}/upload",
+        "/api/projects/{project_id}/analysis-runs",
+        "/api/runs/{run_id}",
+        "/api/runs/{run_id}/insights",
+        "/api/insights/{insight_id}",
+        "/api/insights/{insight_id}/evidence",
+        "/api/runs/{run_id}/cancel",
+        "/api/projects/{project_id}/knowledge/candidates",
+        "/api/projects/{project_id}/knowledge/confirmed",
+        "/api/knowledge/candidates/{candidate_id}",
+        "/api/knowledge/candidates/{candidate_id}/confirm",
+        "/api/knowledge/candidates/{candidate_id}/reject",
+        "/api/knowledge/candidates/{candidate_id}/false-positive",
+    }
+    missing = expected - paths
+    assert not missing, f"缺少计划要求的端点：{sorted(missing)}"
+
+
+# ============================================================
+# 验收 4：跨 Project 访问被拒绝
+# ============================================================
+
+
+def test_other_users_project_is_not_visible(client: TestClient):
+    owner = _register(client)
+    intruder = _register(client)
+    project_id = _make_project(client, owner)
+
+    # 拥有者能看见
+    assert client.get(f"/api/projects/{project_id}/data-sources", headers=owner).status_code == 200
+    # 别人看不到（404 而非 403：不暴露该 id 是否存在）
+    response = client.get(f"/api/projects/{project_id}/data-sources", headers=intruder)
+    assert response.status_code == 404
+
+
+def test_cross_project_data_source_is_refused_in_run_creation(client: TestClient):
+    owner = _register(client)
+    intruder = _register(client)
+    owner_project = _make_project(client, owner)
+
+    source = client.post(
+        f"/api/projects/{owner_project}/data-sources",
+        json={"format": "txt"},
+        headers=owner,
+    ).json()
+
+    intruder_project = _make_project(client, intruder)
+    response = client.post(
+        f"/api/projects/{intruder_project}/analysis-runs",
+        json={"data_source_id": source["id"]},
+        headers=intruder,
+    )
+    # 数据源不属于该项目 → 404
+    assert response.status_code == 404
+
+
+def test_run_of_another_project_is_not_readable(client: TestClient):
+    owner = _register(client)
+    intruder = _register(client)
+    owner_project = _make_project(client, owner)
+
+    source = client.post(
+        f"/api/projects/{owner_project}/data-sources",
+        json={"format": "txt"},
+        headers=owner,
+    ).json()
+
+    with patch("app.api.routes_runs._dispatch"):
+        created = client.post(
+            f"/api/projects/{owner_project}/analysis-runs",
+            json={"data_source_id": source["id"]},
+            headers=owner,
+        )
+    assert created.status_code == 202, created.text
+    run_id = created.json()["run_id"]
+
+    assert client.get(f"/api/runs/{run_id}", headers=owner).status_code == 200
+    assert client.get(f"/api/runs/{run_id}", headers=intruder).status_code == 404
+
+
+def test_cancel_of_another_project_run_is_refused(client: TestClient):
+    owner = _register(client)
+    intruder = _register(client)
+    owner_project = _make_project(client, owner)
+    source = client.post(
+        f"/api/projects/{owner_project}/data-sources",
+        json={"format": "txt"},
+        headers=owner,
+    ).json()
+    with patch("app.api.routes_runs._dispatch"):
+        run_id = client.post(
+            f"/api/projects/{owner_project}/analysis-runs",
+            json={"data_source_id": source["id"]},
+            headers=owner,
+        ).json()["run_id"]
+
+    assert client.post(f"/api/runs/{run_id}/cancel", headers=intruder).status_code == 404
+
+
+# ============================================================
+# 验收 2：分析端点立即返回、不阻塞
+# ============================================================
+
+
+def test_create_run_returns_immediately_with_run_id_and_queued(client: TestClient):
+    """计划第 867 行：立即返回 `run_id + queued`。"""
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    source = client.post(
+        f"/api/projects/{project_id}/data-sources",
+        json={"format": "txt"},
+        headers=headers,
+    ).json()
+
+    with patch("app.api.routes_runs._dispatch") as dispatch:
+        response = client.post(
+            f"/api/projects/{project_id}/analysis-runs",
+            json={
+                "data_source_id": source["id"],
+                "time_range": {
+                    "start": "2026-09-23T12:00:00+00:00",
+                    "end": "2026-09-23T13:00:00+00:00",
+                },
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["run_id"] > 0
+    assert body["status"] == "queued"
+    assert body["reused"] is False
+    # 关键：任务被**派发出去**而不是在这里执行
+    assert dispatch.call_count == 1
+
+
+def test_create_run_does_not_analyse_inline(client: TestClient):
+    """端点里不能出现模型调用 —— 分析属 Worker。"""
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    source = client.post(
+        f"/api/projects/{project_id}/data-sources",
+        json={"format": "txt"},
+        headers=headers,
+    ).json()
+
+    with patch("app.api.routes_runs._dispatch"), patch(
+        "app.gateways.router.Router.generate"
+    ) as generate:
+        client.post(
+            f"/api/projects/{project_id}/analysis-runs",
+            json={"data_source_id": source["id"]},
+            headers=headers,
+        )
+    assert generate.call_count == 0, "创建 Run 的端点里不该调用模型"
+
+
+def test_duplicate_submission_reuses_the_run(client: TestClient):
+    """幂等：相同参数重复提交应复用同一个 Run，不重复执行也不重复计费。"""
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    source = client.post(
+        f"/api/projects/{project_id}/data-sources",
+        json={"format": "txt"},
+        headers=headers,
+    ).json()
+    payload = {
+        "data_source_id": source["id"],
+        "time_range": {
+            "start": "2026-09-23T12:00:00+00:00",
+            "end": "2026-09-23T13:00:00+00:00",
+        },
+    }
+
+    with patch("app.api.routes_runs._dispatch"):
+        first = client.post(
+            f"/api/projects/{project_id}/analysis-runs", json=payload, headers=headers
+        ).json()
+        # 把它置为 completed，模拟上次跑成功
+        with SessionLocal() as session:
+            session.execute(
+                text(
+                    "UPDATE agent_runs SET status='running' WHERE id=:i"
+                ),
+                {"i": first["run_id"]},
+            )
+            session.execute(
+                text("UPDATE agent_runs SET status='completed' WHERE id=:i"),
+                {"i": first["run_id"]},
+            )
+            session.commit()
+        second = client.post(
+            f"/api/projects/{project_id}/analysis-runs", json=payload, headers=headers
+        ).json()
+
+    assert second["run_id"] == first["run_id"]
+    assert second["reused"] is True
+
+
+def test_run_status_endpoint_reports_progress_and_cost(client: TestClient):
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    source = client.post(
+        f"/api/projects/{project_id}/data-sources",
+        json={"format": "txt"},
+        headers=headers,
+    ).json()
+    with patch("app.api.routes_runs._dispatch"):
+        run_id = client.post(
+            f"/api/projects/{project_id}/analysis-runs",
+            json={"data_source_id": source["id"]},
+            headers=headers,
+        ).json()["run_id"]
+
+    body = client.get(f"/api/runs/{run_id}", headers=headers).json()
+    for field in (
+        "id", "status", "current_phase", "phase_history",
+        "tokens_input", "tokens_output", "cost_actual", "cancel_requested",
+    ):
+        assert field in body, f"RunResponse 缺少 {field}"
+    assert body["status"] == "queued"
+
+
+def test_cancel_endpoint_sets_the_flag_and_explains_granularity(client: TestClient):
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    source = client.post(
+        f"/api/projects/{project_id}/data-sources",
+        json={"format": "txt"},
+        headers=headers,
+    ).json()
+    with patch("app.api.routes_runs._dispatch"):
+        run_id = client.post(
+            f"/api/projects/{project_id}/analysis-runs",
+            json={"data_source_id": source["id"]},
+            headers=headers,
+        ).json()["run_id"]
+
+    body = client.post(f"/api/runs/{run_id}/cancel", headers=headers).json()
+    assert body["cancel_requested"] is True
+    # 诚实说明粒度（计划第 710 行）
+    assert "检查点" in body["note"]
+    assert client.get(f"/api/runs/{run_id}", headers=headers).json()["cancel_requested"] is True
+
+
+# ============================================================
+# 上传端点
+# ============================================================
+
+
+def test_upload_persists_events_and_returns_stats(client: TestClient):
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+
+    content = (
+        b"Jun 14 15:16:01 combo sshd(pam_unix)[19939]: authentication failure rhost=218.188.2.4\n"
+        b"Jun 14 15:16:02 combo kernel: contact ops@example.com for help\n"
+    )
+    response = client.post(
+        f"/api/projects/{project_id}/upload",
+        files={"file": ("syslog.txt", content, "text/plain")},
+        data={"fmt": "txt"},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["events_persisted"] == 2
+    assert body["parse"]["parsed"] == 2
+    assert body["created_data_source"] is True
+    # 脱敏计数要回传（阶段 11 要展示）
+    assert body["mask"]["total"] >= 1
+
+
+def test_upload_rejects_unsupported_format(client: TestClient):
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    response = client.post(
+        f"/api/projects/{project_id}/upload",
+        files={"file": ("a.csv", b"a,b,c\n", "text/csv")},
+        data={"fmt": "csv"},
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+def test_upload_to_another_project_is_refused(client: TestClient):
+    owner = _register(client)
+    intruder = _register(client)
+    project_id = _make_project(client, owner)
+    response = client.post(
+        f"/api/projects/{project_id}/upload",
+        files={"file": ("a.txt", b"Jun 14 15:16:01 h a[1]: x\n", "text/plain")},
+        data={"fmt": "txt"},
+        headers=intruder,
+    )
+    assert response.status_code == 404
+
+
+# ============================================================
+# 知识审核端点
+# ============================================================
+
+
+def test_knowledge_endpoints_require_project_scope(client: TestClient):
+    headers = _register(client)
+    response = client.get("/api/projects/999999/knowledge/candidates", headers=headers)
+    assert response.status_code == 404
+
+
+def test_confirm_missing_candidate_is_404(client: TestClient):
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    # 这些端点的路径里只有 candidate_id，故 project_id 走 query 参数
+    response = client.post(
+        "/api/knowledge/candidates/cand_nonexistent/confirm",
+        params={"project_id": project_id},
+        headers=headers,
+    )
+    assert response.status_code == 404
+
+
+def test_confirm_without_project_id_is_422(client: TestClient):
+    """缺 project_id 直接 422：不能靠"不传就跳过归属校验"绕过隔离。"""
+    headers = _register(client)
+    response = client.post(
+        "/api/knowledge/candidates/cand_x/confirm", headers=headers
+    )
+    assert response.status_code == 422
+
+
+def test_confirm_with_another_users_project_is_404(client: TestClient):
+    """带别人的 project_id 也拿不到 —— 归属校验在依赖里完成。"""
+    owner = _register(client)
+    intruder = _register(client)
+    project_id = _make_project(client, owner)
+    response = client.post(
+        "/api/knowledge/candidates/cand_x/confirm",
+        params={"project_id": project_id},
+        headers=intruder,
+    )
+    assert response.status_code == 404

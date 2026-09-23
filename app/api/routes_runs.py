@@ -1,0 +1,302 @@
+"""上传与分析 Run 端点。
+
+阶段 10 验收的两条关键点在这里：
+- 「分析端点**立即返回、不阻塞**」：`POST /analysis-runs` 只创建 `queued` 行并
+  派发 Celery 任务，绝不在这里跑分析；
+- 「跨 Project 访问被拒绝」：经 `ProjectScopeDep`，并被
+  `data_source_id` 的归属校验再兜一层。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+
+from app.analysis.idempotency import make_idempotency_key
+from app.analysis.runner import RunRequest, create_run
+from app.api.deps import ProjectScopeDep, SessionDep
+from app.api.schemas import (
+    CreateRunRequest,
+    CreateRunResponse,
+    EvidenceResponse,
+    InsightResponse,
+    RunResponse,
+    UploadResponse,
+)
+from app.api.scoping import InsightScopeDep, RunScopeDep
+from app.config import get_settings
+from app.models.insight import Insight
+from app.repositories.agent_run import AgentRunRepository
+from app.repositories.evidence import EvidenceRepository
+from app.repositories.insight import InsightRepository
+from app.services.upload_service import UploadService, UploadTooLargeError
+
+router = APIRouter()
+
+
+def _uploads_dir() -> Path:
+    return Path(get_settings().data_dir) / "uploads"
+
+
+# ============================================================
+# 上传
+# ============================================================
+
+
+@router.post(
+    "/api/projects/{project_id}/upload",
+    response_model=UploadResponse,
+    tags=["upload"],
+)
+async def upload_log(
+    scope: ProjectScopeDep,
+    session: SessionDep,
+    # FastAPI 的文件上传就必须写成 File(...) 默认值，这是框架约定写法
+    file: UploadFile = File(...),  # noqa: B008
+    fmt: str = Form(...),
+    data_source_id: int | None = Form(default=None),
+) -> UploadResponse:
+    """上传日志：脱敏 → 落盘 → 解析 → 入库（阶段 04 的管道）。
+
+    **原始文件不落盘**，磁盘上只有脱敏后的版本（红线 5）。
+    """
+    if fmt not in ("txt", "jsonl"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"不支持的格式 {fmt!r}；V1 只支持 txt 与 jsonl",
+        )
+
+    content = await file.read()
+
+    service = UploadService(session, uploads_dir=_uploads_dir())
+    try:
+        result = service.ingest(
+            project_id=scope.project_id,
+            content=content,
+            filename=file.filename or "upload.log",
+            fmt=fmt,
+            data_source_id=data_source_id,
+        )
+    except UploadTooLargeError as exc:
+        # 超限明确拒绝（阶段 04 验收第 5 条），不是悄悄截断
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    session.flush()
+    return UploadResponse(**result.as_dict())
+
+
+# ============================================================
+# 分析 Run
+# ============================================================
+
+
+@router.post(
+    "/api/projects/{project_id}/analysis-runs",
+    response_model=CreateRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["runs"],
+)
+def create_analysis_run(
+    payload: CreateRunRequest, scope: ProjectScopeDep, session: SessionDep
+) -> CreateRunResponse:
+    """创建分析：**立即返回 `run_id + queued`**（计划第 867 行）。
+
+    耗时分析交给 Celery worker，本端点只落一行 queued 并派发任务。
+    """
+    from app.models.datasource import DataSource
+
+    source = session.get(DataSource, payload.data_source_id)
+    if source is None or int(source.project_id) != scope.project_id:
+        # 刻意 404：不暴露别的项目里是否存在这个 data_source
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"数据源 {payload.data_source_id} 不存在",
+        )
+
+    domain = _load_domain()
+    now = datetime.now(timezone.utc)
+    start = payload.time_range.start if payload.time_range and payload.time_range.start else _epoch()
+    end = payload.time_range.end if payload.time_range and payload.time_range.end else now
+
+    filters = (
+        payload.filters.model_dump(exclude_none=True) if payload.filters else {}
+    )
+    request = RunRequest(
+        project_id=scope.project_id,
+        source_id=int(source.id),
+        time_start=start,
+        time_end=end,
+        domain_id=domain.domain_id,
+        domain_version=domain.version,
+        filters=filters,
+        start_tier=payload.start_tier or "L2",
+        run_input=payload.model_dump(mode="json"),
+    )
+
+    runs = AgentRunRepository(session)
+    run_id, run_status, reused = create_run(runs, request)
+    session.flush()
+
+    if not reused:
+        _dispatch(run_id, scope.project_id, request)
+
+    return CreateRunResponse(run_id=run_id, status=run_status, reused=reused)
+
+
+@router.get("/api/runs/{run_id}", response_model=RunResponse, tags=["runs"])
+def get_run(scope: RunScopeDep) -> RunResponse:
+    """状态、进度、成本（计划第 868 行）。"""
+    run = scope.run
+    return RunResponse(
+        id=int(run.id),
+        project_id=int(run.project_id),
+        status=run.status,
+        current_phase=run.current_phase,
+        phase_history=run.phase_history,
+        tokens_input=int(run.tokens_input or 0),
+        tokens_output=int(run.tokens_output or 0),
+        cost_actual=float(run.cost_actual or 0),
+        error=run.error,
+        run_metadata=run.run_metadata,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        last_heartbeat=run.last_heartbeat,
+        cancel_requested=bool(run.cancel_requested),
+    )
+
+
+@router.post("/api/runs/{run_id}/cancel", tags=["runs"])
+def cancel_run(scope: RunScopeDep, session: SessionDep) -> dict:
+    """请求取消。
+
+    **诚实说明粒度**（计划第 710 行）：置标记后 Worker 在下一个检查点生效；
+    若恰好进入一次长模型调用，最坏要等该调用返回，不承诺秒停。
+    """
+    runs = AgentRunRepository(session)
+    run_id = scope.run_id
+    runs.request_cancel(scope.project_id, run_id)
+    session.flush()
+    return {
+        "run_id": run_id,
+        "cancel_requested": True,
+        "note": "取消将在下一个检查点生效；进行中的模型调用需等其返回",
+    }
+
+
+# ============================================================
+# Insight / Evidence
+# ============================================================
+
+
+@router.get(
+    "/api/runs/{run_id}/insights",
+    response_model=list[InsightResponse],
+    tags=["insights"],
+)
+def list_run_insights(scope: RunScopeDep, session: SessionDep) -> list[InsightResponse]:
+    run_id = scope.run_id
+    return [
+        _insight_response(i)
+        for i in InsightRepository(session).list_for_run(scope.project_id, run_id)
+    ]
+
+
+@router.get("/api/insights/{insight_id}", response_model=InsightResponse, tags=["insights"])
+def get_insight(scope: InsightScopeDep) -> InsightResponse:
+    return _insight_response(scope.insight)
+
+
+@router.get(
+    "/api/insights/{insight_id}/evidence",
+    response_model=list[EvidenceResponse],
+    tags=["insights"],
+)
+def list_insight_evidence(scope: InsightScopeDep, session: SessionDep) -> list[EvidenceResponse]:
+    """证据是「fact 可点击核对」的数据来源（阶段 11 验收）。"""
+    rows = EvidenceRepository(session).list_for_insight(scope.project_id, scope.insight_id)
+    return [
+        EvidenceResponse(
+            id=int(e.id),
+            insight_id=int(e.insight_id),
+            source_id=int(e.source_id) if e.source_id is not None else None,
+            event_ids=e.event_ids,
+            time_range=e.time_range,
+            calculation=e.calculation,
+            description=e.description,
+        )
+        for e in rows
+    ]
+
+
+# ============================================================
+# 内部
+# ============================================================
+
+
+def _epoch() -> datetime:
+    return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _load_domain():
+    from app.domains.registry import get_domain_registry
+
+    return get_domain_registry().load("computer_monitoring")
+
+
+def _dispatch(run_id: int, project_id: int, request: RunRequest) -> None:
+    """把执行派发给 Celery。
+
+    派发失败**不吞掉**：标记成 error 字段由调用方看得到，但端点本身仍返回
+    202 + queued（因为 Run 已创建，前端可以去查状态）。
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        from app.tasks.analysis import execute_run_task
+
+        execute_run_task.delay(
+            run_id=run_id,
+            project_id=project_id,
+            start_tier=request.start_tier,
+        )
+    except Exception as exc:  # noqa: BLE001 - broker 不可用不该让创建失败
+        logger.warning("派发 Run %s 到 Celery 失败：%s", run_id, exc)
+
+
+def _insight_response(insight: Insight) -> InsightResponse:
+    return InsightResponse(
+        id=int(insight.id),
+        project_id=int(insight.project_id),
+        run_id=int(insight.run_id),
+        incident_id=int(insight.incident_id) if insight.incident_id is not None else None,
+        type=insight.type,
+        severity=insight.severity,
+        confidence=float(insight.confidence),
+        title=insight.title,
+        summary=insight.summary,
+        reasoning=insight.reasoning,
+        limitations=insight.limitations,
+        created_at=insight.created_at,
+    )
+
+
+def build_idempotency_key_for(request: RunRequest) -> str:
+    """供测试与排障直接算键，避免测试自己重写一遍算法。"""
+    return make_idempotency_key(
+        project_id=request.project_id,
+        source_id=request.source_id,
+        time_start=request.time_start,
+        time_end=request.time_end,
+        filters=request.filters,
+        domain_id=request.domain_id,
+        domain_version=request.domain_version,
+    )
