@@ -34,7 +34,7 @@ def healthz_deps() -> JSONResponse:
                 "ok": True,
                 "server_version": conn.execute(text("SHOW server_version")).scalar_one(),
             }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — 就绪探针必须捕获一切并如实上报
         checks["postgres"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     client = None
@@ -42,7 +42,7 @@ def healthz_deps() -> JSONResponse:
         client = Redis.from_url(settings.redis_url, socket_connect_timeout=3)
         client.ping()
         checks["redis"] = {"ok": True, "version": client.info().get("redis_version")}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — 就绪探针必须捕获一切并如实上报
         checks["redis"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     finally:
         if client is not None:

@@ -1,7 +1,10 @@
 # --- 密钥 / 本地配置 ---
 .env
 .env.local
+.env.*
+!.env.example
 *.pem
+*.key
 
 # --- Python ---
 .venv/
@@ -15,13 +18,27 @@ __pycache__/
 .coverage
 htmlcov/
 
+# --- 沙箱下的工具缓存（本机 %LOCALAPPDATA% / D: 不可写，被重定向进项目）---
+# uv：全局 UV_CACHE_DIR=D:\dev-cache\uv-cache 在沙箱下不可写，需覆盖为项目内目录
+.uv-cache/
+# npm：npx 下载 MCP server 时 %LOCALAPPDATA%\npm-cache 报 EPERM，需覆盖为项目内目录
+.npm-cache/
+# 测试探针（系统临时目录在沙箱下不可枚举，探针库落在工作区内）
+.pytest-tmp/
+# alembic 执行后留下的字节码目录
+migrations/__pycache__/
+
 # --- 运行时数据 ---
 # uploads/ 存的是脱敏后的日志，属运行数据，不进版本库
 uploads/*
 !uploads/.gitkeep
+# 知识库运行时数据（confirmed/staging）走数据卷，不进代码仓库
+data/
 
 # --- 工具 ---
 .idea/
 .vscode/
 *.swp
 .DS_Store
+Thumbs.db
+desktop.ini

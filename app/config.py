@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     model_provider_base_url: str = ""
     model_provider_api_key: str = ""
 
+    # --- 推理档位（阶段 06 Router 用）---
+    # 合法值只有 off / low / high / max：DeepSeek 官方 API 与 DSH 适配器
+    # 都只接受这四个（off = 关闭思考；其余为开启思考并指定强度）。
+    # 注意 medium 不是合法值，历史文档里的 medium 映射已作废。
+    model_l1_reasoning: str = ""
+    model_l2_reasoning: str = ""
+    model_l3_reasoning: str = ""
+
     # --- 成本单价（元 / 每 1M token）---
     model_l1_price_input_per_1m: float = 0.0
     model_l1_price_output_per_1m: float = 0.0
@@ -43,6 +51,13 @@ class Settings(BaseSettings):
     model_l2_price_output_per_1m: float = 0.0
     model_l3_price_input_per_1m: float = 0.0
     model_l3_price_output_per_1m: float = 0.0
+    # 缓存命中价与未命中价相差约 50 倍，阶段 07 成本控制必须分开计费
+    model_cache_hit_input_price_per_1m: float = 0.0
+    # 高峰时段单价倍数（工作日 9:00-12:00、14:00-18:00 北京时间）
+    model_peak_price_multiplier: float = 2.0
+
+    # --- 运行时数据目录（知识库 confirmed/staging，见修订说明第 2 条）---
+    data_dir: str = "./data"
 
     # --- 预算 ---
     monthly_budget: float = 10.0
@@ -70,6 +85,22 @@ class Settings(BaseSettings):
             getattr(self, f"{prefix}_input_per_1m"),
             getattr(self, f"{prefix}_output_per_1m"),
         )
+
+    def tier_reasoning(self, tier: str) -> str:
+        """把等级翻译成推理档位（off / low / high / max）。
+
+        阶段 06 的 Router 用它决定是否开启思考及强度；
+        业务代码同样只认等级，不认档位字面量。
+        """
+        mapping = {
+            "L1": self.model_l1_reasoning,
+            "L2": self.model_l2_reasoning,
+            "L3": self.model_l3_reasoning,
+        }
+        try:
+            return mapping[tier.upper()]
+        except KeyError:
+            raise ValueError(f"未知模型等级: {tier!r}，只接受 L1 / L2 / L3") from None
 
 
 @lru_cache
