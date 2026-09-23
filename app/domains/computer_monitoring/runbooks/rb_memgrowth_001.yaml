@@ -1,0 +1,15 @@
+id: rb_memgrowth_001
+title: 内存持续增长（疑似泄漏）处置
+applies:
+  analyzer: MemoryGrowth
+  metric_name: memory_used
+  condition: "value > 90"
+steps:
+  - "确认增长是单调上升还是锯齿状（锯齿多为缓存，单调才是泄漏特征）"
+  - "定位增长进程，观察其 RSS 随时间的变化曲线"
+  - "对比进程重启后内存是否回落——回落说明是累积型问题"
+  - "检查是否命中缓存未释放、连接池未回收、大对象常驻等常见模式"
+  - "确认增长速率，据此估算到 OOM 的剩余时间"
+  - "结合进程运行时长与发布周期，判断是本次发布引入还是长期累积"
+references:
+  - rb_oom_001

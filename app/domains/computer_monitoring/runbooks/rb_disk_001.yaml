@@ -1,0 +1,14 @@
+id: rb_disk_001
+title: 磁盘空间耗尽处置
+applies:
+  analyzer: DiskFull
+  metric_name: disk_used
+  condition: "value > 95"
+steps:
+  - "确认是哪个挂载点、哪个分区满（不要只看根分区）"
+  - "定位增长最快的目录，判断是日志、临时文件还是数据文件"
+  - "检查是否有大文件被删除但句柄未释放（lsof | grep deleted）"
+  - "确认日志轮转策略是否生效、是否有异常刷屏导致日志暴涨"
+  - "确认 inode 是否耗尽（df -i），这与空间不足是两回事"
+  - "清理或扩容前先确认该目录不属于关键数据"
+references: []

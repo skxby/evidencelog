@@ -1,0 +1,14 @@
+id: rb_cpu_001
+title: CPU 飙升处置
+applies:
+  analyzer: CPUSpike
+  metric_name: cpu_used
+  condition: "value > 90"
+steps:
+  - "确认是用户态还是内核态占用（us / sy / wa 三者比例）"
+  - "定位占用最高的进程与线程"
+  - "确认 iowait 是否偏高——高 iowait 的根因通常在磁盘或网络，不在 CPU"
+  - "核对是否与业务高峰、定时任务或批处理重合"
+  - "检查是否有失控的循环、死循环或异常重试"
+  - "确认该时段是否有部署、扩缩容或压测"
+references: []

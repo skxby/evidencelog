@@ -1,0 +1,13 @@
+id: rb_oom_001
+title: 内存耗尽 / OOM 处置
+applies:
+  analyzer: ProcessCrash
+  message_pattern: "Out of memory|oom-killer|Killed process"
+steps:
+  - "确认时间窗内内存水位与增长趋势（看 memory_used 指标序列）"
+  - "定位占用最高的进程（按 RSS 排序）"
+  - "核对近期是否有新进程 / 部署 / 配置变更"
+  - "检查是否触发过 oom-killer，以及被杀的是哪个进程"
+  - "评估扩容、调整内存上限，或为进程加 cgroup 限制"
+  - "确认 swap 使用情况，判断是真实泄漏还是瞬时峰值"
+references: []

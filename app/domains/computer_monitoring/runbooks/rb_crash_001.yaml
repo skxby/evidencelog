@@ -1,0 +1,13 @@
+id: rb_crash_001
+title: 进程崩溃处置
+applies:
+  analyzer: ProcessCrash
+  message_pattern: "segfault|segmentation fault|core dumped|panic"
+steps:
+  - "确认崩溃进程名、PID 与崩溃时间点"
+  - "检查是否有 core dump 生成，路径与大小"
+  - "查看崩溃前后同一进程的日志，确认是否有前置异常"
+  - "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）"
+  - "核对近期是否有版本升级、依赖变更或配置改动"
+  - "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+references: []
