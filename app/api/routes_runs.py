@@ -145,6 +145,17 @@ def create_analysis_run(
     run_id, run_status, reused = create_run(runs, request)
     session.flush()
 
+    # 把发起这次分析的 trace_id 记在 Run 上（计划第 928 行：贯穿日志与任务）。
+    # 记下来才能在事后用 trace_id 把这个 Run 的日志全捞出来。
+    from app.utils.observability import current_trace_id
+
+    trace_id = current_trace_id()
+    if trace_id and not reused:
+        run_row = runs.get(scope.project_id, run_id)
+        if run_row is not None:
+            run_row.run_metadata = {**(run_row.run_metadata or {}), "trace_id": trace_id}
+            session.flush()
+
     if not reused:
         _dispatch(run_id, scope.project_id, request)
 
@@ -171,6 +182,33 @@ def get_run(scope: RunScopeDep) -> RunResponse:
         last_heartbeat=run.last_heartbeat,
         cancel_requested=bool(run.cancel_requested),
     )
+
+
+@router.get("/api/runs/{run_id}/detail", tags=["runs"])
+def get_run_detail(scope: RunScopeDep, session: SessionDep) -> dict:
+    """Run 详情：一次复述「做了什么、花了多少、为何得到这个结论」（计划第 940 行）。
+
+    这是**只读聚合**：把散落在 run / model_calls / tool_usage / insights /
+    evidences 里的信息按"审阅者会问的问题"重新组织，并顺带自检说不通的地方。
+    """
+    from app.analysis.run_detail import build_run_detail
+
+    run = scope.run
+
+    insights = InsightRepository(session).list_for_run(scope.project_id, scope.run_id)
+    evidence_repo = EvidenceRepository(session)
+    evidence_by_insight = {
+        int(insight.id): evidence_repo.list_for_insight(scope.project_id, int(insight.id))
+        for insight in insights
+    }
+
+    detail = build_run_detail(
+        run=run, insights=insights, evidence_by_insight=evidence_by_insight
+    )
+    payload = detail.as_dict()
+    # 把人话复述也一并返回：验收问的就是"能否完整复述"
+    payload["narrative"] = detail.narrate()
+    return payload
 
 
 @router.post("/api/runs/{run_id}/cancel", tags=["runs"])

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from redis import Redis
 from sqlalchemy import text
 
+from app.api.middleware import TraceIdMiddleware
 from app.api.routes_auth_projects import router as auth_projects_router
 from app.api.routes_knowledge import router as knowledge_router
 from app.api.routes_runs import router as runs_router
@@ -22,6 +23,13 @@ app = FastAPI(
     version="0.1.0",
     description="个人全栈、单领域、只读的日志分析 Agent Runtime（V1）",
 )
+
+# 结构化日志与 trace_id（阶段 12）：必须在最前面配置，
+# 否则模块级 logger 会在配置前就被创建（structlog 缓存首次使用的 logger）
+from app.utils.observability import configure_logging
+
+configure_logging(level=settings.log_level)
+app.add_middleware(TraceIdMiddleware)
 
 app.include_router(auth_projects_router)
 app.include_router(runs_router)

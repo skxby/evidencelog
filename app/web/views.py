@@ -55,6 +55,17 @@ def run_status_page(request: Request, run_id: int) -> HTMLResponse:
     )
 
 
+@router.get(
+    "/runs/{run_id}/detail", response_class=HTMLResponse, include_in_schema=False
+)
+def run_detail_page(request: Request, run_id: int) -> HTMLResponse:
+    """Run 详情视图（计划第 938 行：V1 做一个简单的 Run 列表/详情视图即可）。"""
+    return _render(
+        request, "run_detail.html", run_id=run_id,
+        project_id=request.query_params.get("project_id", ""),
+    )
+
+
 @router.get("/report/{run_id}", response_class=HTMLResponse, include_in_schema=False)
 def report_page(request: Request, run_id: int) -> HTMLResponse:
     return _render(

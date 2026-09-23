@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from app.analysis.heartbeat import CancelledError
@@ -15,8 +14,9 @@ from app.analysis.pipeline import PipelineInput, analyze
 from app.analysis.runner import RunExecutor
 from app.celery_app import celery_app
 from app.db import SessionLocal
+from app.utils.observability import bind_run_context, get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @celery_app.task(name="app.tasks.analysis.execute_run", bind=True)
@@ -27,7 +27,15 @@ def execute_run_task(
 
     Windows 上 worker 需加 `-P solo`（见 AGENTS.md 技术栈）。
     """
-    session = SessionLocal()
+    # 任务也在同一个 trace 下：这样"HTTP 请求 → 入队 → Worker 执行"
+    # 的日志能被同一个 trace_id 串起来（计划第 928 行）
+    with bind_run_context(run_id=run_id, project_id=project_id):
+        return _execute(session_factory=SessionLocal, run_id=run_id,
+                        project_id=project_id, start_tier=start_tier)
+
+
+def _execute(*, session_factory, run_id: int, project_id: int, start_tier: str) -> dict[str, Any]:
+    session = session_factory()
     try:
         from app.analysis.persistence import persist_insights
         from app.domains.registry import get_domain_registry

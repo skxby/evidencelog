@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Run 详情{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="spread">
+    <h2>Run #{{ run_id }} 详情</h2>
+    <div class="row">
+      <a class="small" href="/runs/{{ run_id }}?project_id={{ project_id }}">← 状态页</a>
+      <a class="small" href="/report/{{ run_id }}?project_id={{ project_id }}">报告页 →</a>
+    </div>
+  </div>
+  <div id="status-line" class="row"></div>
+  <div id="self-check" class="banner banner-warn" hidden></div>
+</div>
+
+<div class="card">
+  <h2>复述：系统做了什么、花了多少、为何得到这个结论</h2>
+  <p class="muted small">
+    这段文字由服务端根据库里的记录自动生成。如果出现「未记录」「未知」，
+    说明可观测性还有缺口 —— 那是需要修的问题，不是可以忽略的空白。
+  </p>
+  <pre id="narrative" class="mono" style="white-space:pre-wrap"></pre>
+</div>
+
+<div class="card">
+  <h2>花费明细</h2>
+  <div id="cost-by-tier"></div>
+  <h3>每次模型调用</h3>
+  <div id="calls"></div>
+</div>
+
+<div class="card">
+  <h2>工具用量</h2>
+  <div id="tools"></div>
+</div>
+
+<div class="card">
+  <h2>阶段进度</h2>
+  <div id="phases"></div>
+</div>
+
+<div class="card">
+  <h2>结论与证据</h2>
+  <div id="insights"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const RUN_ID = {{ run_id }};
+const PROJECT_ID = "{{ project_id }}";
+
+function table(headers, rows) {
+  if (!rows.length) return el('div', { class: 'empty', text: '（无）' });
+  const node = el('table');
+  node.appendChild(el('tr', {}, headers.map((h) => el('th', { text: h }))));
+  for (const row of rows) {
+    node.appendChild(el('tr', {}, row.map((cell) =>
+      el('td', { class: typeof cell === 'number' ? 'mono' : '', text: String(cell) }))));
+  }
+  return node;
+}
+
+async function load() {
+  let detail;
+  try {
+    detail = await API.get(
+      `/api/runs/${RUN_ID}/detail?project_id=${encodeURIComponent(PROJECT_ID)}`);
+  } catch (error) {
+    showError(`加载 Run 详情失败：${error.message}`);
+    return;
+  }
+
+  const statusLine = document.getElementById('status-line');
+  statusLine.textContent = '';
+  statusLine.appendChild(statusPill(detail.status));
+  statusLine.appendChild(el('span', { class: 'muted small mono',
+    text: `trace_id: ${detail.trace_id || '未记录'}` }));
+  if (detail.timeline.duration_seconds !== null) {
+    statusLine.appendChild(el('span', { class: 'muted small',
+      text: `耗时 ${detail.timeline.duration_seconds.toFixed(1)}s` }));
+  }
+
+  // 自检结果：说不通的地方必须醒目
+  const check = document.getElementById('self-check');
+  if (detail.anomalies && detail.anomalies.length) {
+    check.hidden = false;
+    check.textContent = '';
+    check.appendChild(el('strong', { text: '⚠ 复述时发现以下问题（可观测性缺口）' }));
+    const list = el('ul');
+    for (const item of detail.anomalies) list.appendChild(el('li', { text: item }));
+    check.appendChild(list);
+  }
+
+  document.getElementById('narrative').textContent = detail.narrative || '（无）';
+
+  // 花费
+  const byTier = detail.cost.by_tier || {};
+  document.getElementById('cost-by-tier').appendChild(table(
+    ['等级', '调用次数', '输入 tokens', '输出 tokens', '成本'],
+    Object.entries(byTier).map(([tier, info]) =>
+      [tier, info.calls, info.tokens_input, info.tokens_output, fmtCost(info.cost)]),
+  ));
+  document.getElementById('calls').appendChild(table(
+    ['call_id', '等级', '型号', '输入', '输出', '成本', '状态'],
+    (detail.cost.calls || []).map((c) =>
+      [c.call_id || '—', c.tier || '—', c.model || '—',
+       c.tokens_input ?? 0, c.tokens_output ?? 0, fmtCost(c.cost), c.status || '—']),
+  ));
+
+  // 工具
+  const toolRows = [];
+  for (const [name, entries] of Object.entries(detail.tools.usage || {})) {
+    for (const entry of (entries || [])) {
+      toolRows.push([name, entry.ok ? '成功' : '失败',
+        `${entry.elapsed_ms ?? '—'} ms`, entry.error || '—']);
+    }
+  }
+  document.getElementById('tools').appendChild(
+    table(['工具', '结果', '耗时', '错误'], toolRows));
+
+  // 阶段
+  const phases = el('div', { class: 'phases' });
+  for (const entry of (detail.phases.history || [])) {
+    let cls = 'phase';
+    if (entry.status === 'skipped') cls += ' phase-skipped';
+    else if (entry.status === 'done') cls += ' phase-done';
+    phases.appendChild(el('span', { class: cls,
+      text: `${entry.phase}${entry.from ? ` (${entry.from} → ${entry.status})` : ''}` }));
+  }
+  const phaseBox = document.getElementById('phases');
+  if (phases.childElementCount) phaseBox.appendChild(phases);
+  else phaseBox.appendChild(el('div', { class: 'empty', text: '（无阶段记录）' }));
+
+  // 结论与证据
+  const insightsBox = document.getElementById('insights');
+  if (!detail.insights.length) {
+    insightsBox.appendChild(el('div', { class: 'empty', text: '（无结论）' }));
+  }
+  for (const insight of detail.insights) {
+    const sem = semanticsOf(insight.type);
+    const node = el('div', { class: `insight insight-${sem.cls}` });
+    node.appendChild(el('div', {}, [
+      el('span', { class: `semantic semantic-${sem.cls}`, text: `${sem.symbol} ${sem.label}` }),
+      el('span', { class: 'insight-title', text: insight.title }),
+      el('span', { class: 'muted small', text: `　证据事件 ${insight.evidence_event_ids.join(', ') || '无'}` }),
+    ]));
+    if (insight.summary) node.appendChild(el('div', { class: 'insight-summary', text: insight.summary }));
+    for (const book of (insight.runbooks || [])) {
+      const box = el('div', { class: 'runbook' });
+      box.appendChild(el('h4', { text: `处置步骤 · ${book.title}（${book.id}）` }));
+      const list = el('ol');
+      for (const step of (book.steps || [])) list.appendChild(el('li', { text: step }));
+      box.appendChild(list);
+      box.appendChild(el('div', { class: 'readonly', text: 'V1 只读展示，不自动执行任何步骤。' }));
+      node.appendChild(box);
+    }
+    insightsBox.appendChild(node);
+  }
+}
+
+load();
+</script>
+{% endblock %}
