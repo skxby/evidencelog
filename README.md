@@ -1,8 +1,13 @@
 # Log Intelligence Agent
 
-产品/设备日志智能分析 Agent 平台。V1 只做一件事：把日志变成**带证据、可追溯、成本可控**的分析报告。
+把日志变成**带证据、可追溯、成本可控**的分析报告。
 
-> 施工依据：《Log_Intelligence_Agent_V1_个人全栈工程编码计划》。本 README 只写**怎么把环境跑起来**，架构与阶段设计看那份计划。
+V1 是个人全栈、单领域、**只读**的日志分析 Runtime：上传日志 → 脱敏 → 解析 →
+分组/归并 → 规则 + 模型分层分析 → 带证据的 Insight 报告。
+核心不是「更聪明」，而是**受约束、可恢复、可观测、成本可控**。
+
+> 本 README 只写**怎么把它跑起来、怎么用**。架构与阶段设计见
+> 《Log_Intelligence_Agent_V1_个人全栈工程编码计划》。
 
 ---
 
@@ -10,128 +15,197 @@
 
 | 组件 | 版本 | 说明 |
 |---|---|---|
-| Docker Desktop | 已装并**保持运行** | PG 与 Redis 都跑在容器里，本机没有原生安装 |
-| Python | **3.13**（不要用 3.14） | Celery 官方支持列表到 3.13 为止 |
-| Git | 任意近期版本 | |
+| Docker Desktop | 已安装并**保持运行** | 全栈都在容器里跑 |
+| Docker Compose | v2 及以上（`docker compose`，不是 `docker-compose`） | |
+| DeepSeek API Key | 一把可用的 `sk-...` | 没有也能起，但模型分析会降级为纯规则报告 |
 
-## 2. 首次启动
+**只用 Docker 跑的话，本机不需要装 Python。**
+（想直跑测试才需要 Python 3.13；不要用 3.14，Celery 官方支持列表到 3.13 为止。）
+
+---
+
+## 2. 一键起全栈
 
 ```bash
-# 1) 起基础设施（PostgreSQL 15 + Redis 7）
+git clone <本仓库>
+cd <仓库目录>
+
+# ① 准备配置
+cp .env.example .env
+```
+
+打开 `.env`，**至少填这两项**：
+
+```dotenv
+MODEL_PROVIDER_API_KEY=sk-你的真实Key
+SECRET_KEY=换成一串你自己的随机值
+```
+
+其余项都有可用默认值（模型映射、单价、预算、时区）。
+**`.env` 已被 `.gitignore` 与 `.dockerignore` 双双挡住 —— 不会进 Git，也不会进镜像。**
+
+```bash
+# ② 起全栈（首次会构建镜像，约 1-3 分钟）
 docker compose up -d
 
-# 2) 确认两个容器都 healthy
+# ③ 确认都健康
 docker compose ps
+```
 
-# 3) 建虚拟环境并装依赖
+期望看到：
+
+```
+logagent-postgres   Up (healthy)
+logagent-redis      Up (healthy)
+logagent-migrate    Exited (0)      ← 迁移跑完即退出，这是正常的
+logagent-web        Up (healthy)
+logagent-worker     Up
+logagent-beat       Up
+```
+
+浏览器打开 **http://127.0.0.1:8000** 。
+
+> 端口只绑 `127.0.0.1`，不暴露到局域网 —— 与「只读 + 本地」的定位一致。
+> 需要远程访问请自行配端口转发，并自行承担暴露风险。
+
+---
+
+## 3. 最小使用流程（全程不碰命令行）
+
+1. **登录** —— 首次使用点「首次使用？注册这个邮箱」，用同一个邮箱 + 口令即可。
+2. **建项目** —— 项目是数据边界，所有日志与结论都归属某个项目。
+3. **上传日志** —— 选 `.txt`（syslog / log4j / Apache 风格）或 `.jsonl`（逐行 JSON）。
+   上传后页面会显示**解析统计**（总行 / 成功 / 坏行 / 跳过 / 合并）与**脱敏计数**。
+   坏行会列出样本 —— 不会被静默丢弃。
+4. **发起分析** —— 选数据源，可留空时间范围。API **立即返回** `run_id + queued`。
+5. **看状态** —— 状态页每 3 秒刷新，显示阶段进度、token、成本、心跳。
+6. **看报告** —— 结论按四层语义着色：
+   - `✓ 确认`（fact）：**证据可展开逐条核对**，点开能看到关联事件 id
+   - `→ 推测`（inference）：附推理过程
+   - `? 可能`（possibility）：附局限说明
+   - `− 未知`（unknown）：附信息缺口
+
+   命中异常时会附上对应的**处置步骤（runbook）**，V1 只读展示、不自动执行。
+7. **审核知识** —— 报告页下方「待确认知识」列出分析中发现的候选；
+   可以确认 / 编辑 / 丢弃，或点「这其实不是问题」记为误报。
+   确认后写入数据卷，下次分析自动加载。
+
+**部分成功与失败会显著标注**：`partial_success` 顶部显示「⚠ 结果不完整」及中断原因；
+`failed` / `timeout` 显示失败阶段与原因，并提供重新分析入口。
+
+---
+
+## 4. 环境变量说明
+
+完整清单见 `.env.example`。关键项：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `DATABASE_URL` | `...@127.0.0.1:5432/logagent` | 宿主机直跑用。**compose 里会被覆盖成 `@postgres:5432`** |
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | 同上，compose 里覆盖成 `@redis:6379` |
+| `POSTGRES_PASSWORD` | `logagent_dev_pw` | compose 与 `DATABASE_URL` 共用；换它要一起换 |
+| `SECRET_KEY` | `change-me` | JWT 签名密钥，**必须换**；空值会让鉴权失效 |
+| `MODEL_PROVIDER_BASE_URL` | `https://api.deepseek.com` | OpenAI 兼容端点 |
+| `MODEL_PROVIDER_API_KEY` | 空 | 供应商密钥。**留空则模型分析降级为纯规则报告** |
+| `MODEL_L1/L2/L3` | `deepseek-flash` | 等级 → 型号映射。**型号只出现在这里**，业务代码只认 L1–L3 |
+| `MODEL_L*_REASONING` | `off` / `low` / `high` | 合法值只有 `off`/`low`/`high`/`max`；`medium` 是非法值 |
+| `MODEL_L*_PRICE_*_PER_1M` | `1` / `4` | 单价，**元 / 每百万 token**；用于成本核算 |
+| `MONTHLY_BUDGET` / `DEFAULT_RUN_MAX_COST` | `10` / `0.30` | 预算上限，货币单位统一为**人民币元** |
+| `DATA_DIR` | `./data` | 运行时数据（知识库 confirmed/staging）；compose 里是 `/app/data`（卷） |
+| `DEFAULT_TIMEZONE` | `Asia/Shanghai` | 日志时间戳缺时区时按它解析，再转 UTC 存库 |
+
+### 密钥放哪
+
+优先级：**`.env` 的 `MODEL_PROVIDER_API_KEY` > 环境变量 > `$DSH_HOME/.credentials.yaml`**。
+第三条是为了复用已在 DeepSeek Harness 里配好的 Key，避免同一把 Key 存两份。
+都找不到时会**启动即报错并说明去哪里配**，不会等到第一次调用才含糊地失败。
+
+---
+
+## 5. 常用操作
+
+```bash
+# 看日志（JSON 行，带 trace_id —— 排障时按 trace_id 一 grep 就能串起整条链路）
+docker compose logs -f web
+docker compose logs -f worker
+
+# 只重启应用（改代码后）
+docker compose up -d --build web worker
+
+# 手动跑迁移
+docker compose run --rm migrate
+
+# 进数据库看一眼
+docker compose exec postgres psql -U logagent -d logagent -c '\dt'
+
+# 停止（保留数据）／清空数据
+docker compose down
+docker compose down -v
+```
+
+**接口文档**：http://127.0.0.1:8000/docs
+
+---
+
+## 6. 不用 Docker 直跑（开发 / 跑测试）
+
+```bash
+# 只起基础设施
+docker compose up -d postgres redis
+
 python -m venv .venv
-.venv/Scripts/python.exe -m pip install -r requirements.txt   # Windows
-# source .venv/bin/activate && pip install -r requirements.txt  # macOS / Linux
+.venv/Scripts/python.exe -m pip install -r requirements.txt      # Windows
+# source .venv/bin/activate && pip install -r requirements.txt    # macOS / Linux
 
-# 4) 配置
-cp .env.example .env
-# 至少填：SECRET_KEY、MODEL_L1/L2/L3、MODEL_PROVIDER_BASE_URL、MODEL_PROVIDER_API_KEY、
-#        以及各等级的成本单价
-
-# 5) 启动 API
-.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000
+alembic upgrade head
+pytest -q                                          # 单测 + 集成测试
+uvicorn app.main:app --reload                      # http://127.0.0.1:8000
+celery -A app.celery_app worker -P solo -l info    # Windows 必须 -P solo
 ```
 
-## 3. 验证环境真的通了
+### 跑 Golden Set
+
+五个固定场景（正常 / CPU 异常 / 内存增长 / 崩溃 / 坏格式），逐条对照
+`tests/datasets/<场景>/expect.json` 里的期望：
 
 ```bash
-# 存活检查
-curl http://127.0.0.1:8000/healthz
-
-# 就绪检查：会真的去连 PG 和 Redis，任一不通返回 503
-curl http://127.0.0.1:8000/healthz/deps
-
-# 接口文档
-# 浏览器打开 http://127.0.0.1:8000/docs
+pytest tests/golden -q
 ```
 
-跑测试：
+期望值是可编辑的 JSON，每条都带 `sources` 字段注明依据（对应编码计划哪一行）。
+默认**不调用模型**，所以跑一次是零成本、结果可复现。
+
+### 真实模型连通性验证（会产生费用）
+
+默认跳过。要跑需显式开启：
 
 ```bash
-# 全量（需要容器在跑）
-.venv/Scripts/python.exe -m pytest
-
-# 只跑不需要外部依赖的单测
-.venv/Scripts/python.exe -m pytest -m "not integration"
+RUN_LIVE_MODEL_TESTS=1 pytest tests/integration/test_gateway_live.py -v -s
 ```
 
-## 4. 验证 Celery Worker 能消费任务
+---
 
-需要开两个终端。
+## 7. 排障
 
-```bash
-# 终端 A：worker
-.venv/Scripts/python.exe -m celery -A app.celery_app:celery_app worker -l info -P solo
-# 注：Windows 上必须加 -P solo（或 threads），默认的 prefork 在 Windows 不可用
+| 症状 | 处理 |
+|---|---|
+| `docker compose ps` 里 migrate 显示 `Exited (0)` | **正常**：迁移跑完即退出，web/worker 等它成功后才启动 |
+| web 起不来，日志显示连不上数据库 | 确认 postgres 是 `healthy`；`docker compose logs postgres` |
+| 模型分析总是降级成纯规则报告 | `.env` 里 `MODEL_PROVIDER_API_KEY` 是否为空／是否有效 |
+| 报告里没有结论 | 看 Run 状态：`partial_success`/`failed` 会写明中断原因；L0（正常日志）本就无异常结论 |
+| 想确认某次分析到底做了什么 | 打开 `/runs/<id>/detail?project_id=<pid>`，页面会复述阶段、花费、结论与证据 |
+| 端口被占用 | 改 compose 里的端口映射；注意只绑 `127.0.0.1` |
+| Celery 在 Windows 卡住 | 直跑时必须 `-P solo`（compose 里已加） |
 
-# 终端 B：投一个冒烟任务，期望返回 2
-.venv/Scripts/python.exe -c "from app.tasks.health import ping; print(ping.delay(1).get(timeout=30))"
-```
+---
 
-## 5. 环境变量
+## 8. V1 有意不做的事
 
-见 `.env.example`，每项都有注释。两条硬规则：
+这些不是遗漏，是**刻意不做**（完整清单与再评估信号见编码计划第 20 节）：
 
-1. **具体型号只出现在 `.env`**。业务代码只认 `L1` / `L2` / `L3`，通过 `Settings.tier_model()` 翻译。
-2. **密钥不进代码、不进 Git**。`.env` 已在 `.gitignore` 里。
-
-## 6. 目录结构
-
-```text
-app/
-├── main.py              FastAPI 入口（阶段 01 只有健康检查）
-├── config.py            pydantic-settings 配置 + 等级→型号映射
-├── db.py                engine / SessionLocal / get_db / Base
-├── celery_app.py        Celery 实例
-├── models/              SQLAlchemy 模型（阶段 02 起，共 9 张表）
-├── domains/             领域「目录包」插件
-│   ├── base.py          DomainBase（阶段 03）
-│   ├── registry.py      DomainRegistry（阶段 03）
-│   └── computer_monitoring/
-│       ├── parser.py
-│       ├── analyzers/
-│       ├── knowledge/{confirmed,staging}/
-│       ├── runbooks/
-│       └── config.py
-├── parsers/             TXT / JSONL 通用 parser 基类（阶段 04）
-├── tools/               通用数据算子与注册器（阶段 05）
-├── gateways/            模型网关与路由（阶段 06）
-├── policy/              策略与成本控制（阶段 07）
-├── analysis/            分组 / 复杂度评估 / Context 构造 / 编排（阶段 09）
-├── tasks/               Celery 任务
-├── api/                 路由（阶段 10）
-├── web/                 Jinja2 模板与静态资源（阶段 11）
-└── utils/               脱敏 / token 估算 / 时间戳归一
-uploads/                 脱敏后的日志文件（运行数据，不进 Git）
-tests/{unit,integration,datasets}
-migrations/              Alembic
-```
-
-## 7. 本仓库相对计划文档的差异
-
-以下几处是我落地时做的判断，**都可以推翻**：
-
-| 项 | 计划原文 | 实际做法 | 理由 |
-|---|---|---|---|
-| 阶段 01 的 compose | 只写「起 PG/Redis」 | 只含 postgres + redis，web/worker/beat 留到阶段 14 | 与阶段 14 的分工一致，避免现在就要写 Dockerfile |
-| 容器端口 | 未指定绑定地址 | 一律绑 `127.0.0.1` | 与「只读 + 本地」的隐私定位一致，不暴露到局域网 |
-| 模型单价配置 | 只说「自行填入配置」 | 补了 `MODEL_{L1,L2,L3}_PRICE_{INPUT,OUTPUT}_PER_1M` | 原 `.env` 示例里没有这两项，但阶段 07 要算成本 |
-| 密码哈希 | 未指定库 | 直接用 `bcrypt` | `passlib` 自 2020 年起无人维护，与 `bcrypt>=4.1` 组合会抛版本读取错误 |
-| `pytest-celery` | 列为可选项 | 暂不引入 | 它默认拉起 Docker 托管的 worker 容器、测试期额外拉镜像；计划同时给了「直接测函数」的替代路径 |
-| 领域目录位置 | 3.3 节写 `domains/`，阶段 01 写 `app/domains/` | 采用 `app/domains/` | 与阶段 01 的目录树一致 |
-
-## 8. 尚未解决的设计问题
-
-这几处计划文档内部不一致，**开工前需要拍板**，详见评估结论：
-
-1. 阶段 11 要做知识审核（确认/编辑/丢弃/标记误报），但阶段 10 的 API 清单里没有对应端点。
-2. 知识 YAML 到底是「随 domain 进 Git 的代码资产」还是「运行时写入的数据」——影响 Docker 卷设计。
-3. `AgentRun` 没有 `current_phase` / `progress` 字段，但阶段 11 要显示阶段进度。
-4. `Event.group_id` 与 `EventGroup.event_ids` 互为反向索引，真源未定义。
-5. Incident 归并的「同根因」判定算法未定义。
-6. 鉴权机制（JWT vs session cookie）未定。
+- 跨文件 / 长期历史 Baseline、季节性建模（只做文件内统计）
+- 自动分片聚合、实时流处理、Multi-Agent
+- 自动执行处置步骤（只读定位：runbook 仅展示，不自动跑命令）
+- CSV / JSON 导入（V1 只支持 TXT / JSONL）
+- Kubernetes、多环境流水线、复杂计费与角色权限
+- 自动化 LLM Judge（Golden Set 先人工核对）

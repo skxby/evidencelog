@@ -1,0 +1,66 @@
+name: tests
+
+# 计划第 1008 行：CI 只做「自动跑测试」一件事。
+# 刻意不加构建镜像、发布、部署 —— V1 是单机自用，多环境流水线属明确不做项。
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # 集成测试要连真实 PostgreSQL 与 Redis —— 不用 SQLite 顶替：
+    # 项目依赖 JSONB、TIMESTAMPTZ、`WHERE group_id = ?` 这类 PG 行为，
+    # 换库等于把最该验证的东西换掉了。
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: logagent
+          POSTGRES_PASSWORD: logagent_dev_pw
+          POSTGRES_DB: logagent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U logagent -d logagent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      # 与 compose 一致的连接串；集成测试直接用它
+      DATABASE_URL: postgresql+psycopg://logagent:logagent_dev_pw@127.0.0.1:5432/logagent
+      REDIS_URL: redis://127.0.0.1:6379/0
+      SECRET_KEY: ci-only-secret-not-used-anywhere-else
+      # 刻意不配 MODEL_PROVIDER_API_KEY：CI 里不该有真实密钥。
+      # 需要它才能跑的用例（test_gateway_live.py）本来就是默认跳过的。
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"     # 不用 3.14：Celery 官方支持到 3.13
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 跑迁移
+        run: alembic upgrade head
+
+      - name: 跑测试
+        # Golden Set 与隔离攻击用例都在这一条命令里（它们标了 integration）
+        run: pytest -q

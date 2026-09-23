@@ -1,0 +1,61 @@
+# 构建上下文排除清单。
+#
+# 作用有两条，第二条更重要：
+#   1. 让镜像小、构建快（不带 .venv / 缓存 / 测试产物）；
+#   2. **防止密钥进镜像**（计划第 1006 行）。`.env` 里有真实的
+#      DEEPSEEK_API_KEY，一旦被 COPY 进镜像层，就算后续删掉也仍在层历史里。
+
+# ---------- 密钥与本地配置：绝不能进镜像 ----------
+.env
+.env.*
+!.env.example
+.credentials.yaml
+**/.credentials.yaml
+*.pem
+*.key
+
+# ---------- 虚拟环境与缓存 ----------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+.ruff_cache/
+.mypy_cache/
+.uv-cache/
+.npm-cache/
+*.egg-info/
+
+# ---------- 运行数据（走卷，不进镜像）----------
+data/
+uploads/
+*.db
+*.sqlite3
+
+# ---------- 版本控制与编辑器 ----------
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+
+# ---------- 沙箱/工具本地状态：与运行无关，且可能含会话信息 ----------
+.dsh/
+.npm-cache/
+uv.toml
+mcp-内置skills/
+tools-skills-prompt与选型和ide移植/
+
+# ---------- 规格文档与原始样本（镜像内不需要）----------
+# README 是给使用者看的，要留；其余 .md 是编码计划等内部文档
+*.md
+!README.md
+logs/
+docs/
+
+
+# ---------- 测试 ----------
+tests/
+conftest.py
+pytest.ini
