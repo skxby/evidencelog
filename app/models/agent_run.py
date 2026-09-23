@@ -12,12 +12,14 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Integer,
     Numeric,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -63,6 +65,18 @@ class AgentRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(TimestampTZ, nullable=True)
     # 僵尸回收依据：心跳丢失超阈值 → 置 timeout（计划第 705–707 行）
     last_heartbeat: Mapped[datetime | None] = mapped_column(TimestampTZ, nullable=True)
+
+    # 取消标记（计划第 709 行）：Worker 在阶段边界与每次调用前检查它。
+    # 刻意用**独立布尔列**而不是塞进 run_metadata：
+    #   - 它是执行期被反复轮询的「控制标志」，由 API 进程写、Worker 进程读；
+    #   - run_metadata 按计划第 354 行是「最终结果容器」（stop_reason /
+    #     completed_phases / skipped_phases），语义不同；
+    #   - 每次检查都读整个 JSONB 并解析，既慢又容易出现"改了没生效"。
+    # 诚实说明粒度：若恰好进入一次长模型调用，最坏要等该调用返回，
+    # 不承诺「秒停」（计划第 710 行）。
+    cancel_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # 模型调用记录（JSON 数组），不单独建表
     model_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)

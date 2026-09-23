@@ -9,27 +9,223 @@
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from sqlalchemy import select
 
 from app.models import enums
 from app.models.agent_run import AgentRun
 from app.repositories.base import ProjectScopedRepository
 
+logger = logging.getLogger(__name__)
+
 
 class AgentRunRepository(ProjectScopedRepository[AgentRun]):
     model = AgentRun
 
-    def find_by_idempotency_key(
+    # ---------- 创建与幂等 ----------
+
+    def create_queued(
+        self,
+        project_id: int,
+        *,
+        source_id: int | None = None,
+        idempotency_key: str | None = None,
+        run_input: dict[str, Any] | None = None,
+        parent_run_id: int | None = None,
+    ) -> AgentRun:
+        """创建一个 `queued` 的 Run。
+
+        计划第 731 行验收：创建 Run **立即返回** `run_id + queued`。
+        所以这里只落一行 queued，不做任何分析工作。
+        """
+        run = AgentRun(
+            project_id=project_id,
+            source_id=source_id,
+            idempotency_key=idempotency_key,
+            input=run_input,
+            parent_run_id=parent_run_id,
+            status=enums.AGENT_RUN_QUEUED,
+        )
+        return self.add(project_id, run)
+
+    def find_reusable(
         self, project_id: int, idempotency_key: str
     ) -> AgentRun | None:
-        """幂等复用：相同键且已有成功 Run → 直接复用结果（计划第 699–703 行）。"""
+        """找可复用的成功 Run（计划第 703 行：不重复执行、不重复计费）。
+
+        只有 `completed` 才算可复用：`partial_success` 的结果本身不完整，
+        拿它当"已有结果"会把不完整当成完整交付。
+        """
         return self.session.execute(
-            self.scoped(project_id).where(
+            self.scoped(project_id)
+            .where(
                 AgentRun.idempotency_key == idempotency_key,
                 AgentRun.status == enums.AGENT_RUN_COMPLETED,
             )
+            .order_by(AgentRun.id.desc())
+            .limit(1)
         ).scalar_one_or_none()
 
+    def find_by_idempotency_key(
+        self, project_id: int, idempotency_key: str
+    ) -> AgentRun | None:
+        """任意状态下按幂等键取最近一条（便于告知"已有一个在跑"）。"""
+        return self.session.execute(
+            self.scoped(project_id)
+            .where(AgentRun.idempotency_key == idempotency_key)
+            .order_by(AgentRun.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+    # ---------- 心跳与取消 ----------
+
+    def touch_heartbeat(
+        self, project_id: int, run_id: int, *, at: datetime | None = None
+    ) -> bool:
+        """更新心跳（计划第 705 行：各阶段及模型调用前后都要更新）。"""
+        run = self.get(project_id, run_id)
+        if run is None:
+            return False
+        run.last_heartbeat = at or datetime.now(timezone.utc)
+        return True
+
+    def request_cancel(self, project_id: int, run_id: int) -> bool:
+        """置取消标记（计划第 709 行）。幂等：重复置位无副作用。"""
+        run = self.get(project_id, run_id)
+        if run is None:
+            return False
+        run.cancel_requested = True
+        return True
+
+    def is_cancel_requested(self, project_id: int, run_id: int) -> bool:
+        run = self.get(project_id, run_id)
+        return bool(run.cancel_requested) if run is not None else False
+
+    def find_zombie_runs(
+        self,
+        *,
+        timeout_seconds: int,
+        now: datetime | None = None,
+        project_id: int | None = None,
+    ) -> list[AgentRun]:
+        """找出心跳超时、仍是 `running` 的 Run（计划第 706 行）。
+
+        `project_id=None` 表示跨项目扫描 —— 这是**为运维/Beat 任务准备的**，
+        正常业务路径应传 project_id 保持隔离。
+        """
+        reference_time = now or datetime.now(timezone.utc)
+        deadline = reference_time - timedelta(seconds=timeout_seconds)
+
+        statement = select(AgentRun).where(
+            AgentRun.status == enums.AGENT_RUN_RUNNING,
+            # 心跳与开始时间都早于截止时刻（心跳为空则看开始时间）
+            (AgentRun.last_heartbeat < deadline)
+            | (
+                AgentRun.last_heartbeat.is_(None)
+                & (AgentRun.started_at < deadline)
+            ),
+        )
+        if project_id is not None:
+            statement = statement.where(AgentRun.project_id == project_id)
+        return list(self.session.execute(statement.order_by(AgentRun.id)).scalars().all())
+
+    def reclaim_zombies(
+        self,
+        *,
+        timeout_seconds: int,
+        now: datetime | None = None,
+        project_id: int | None = None,
+    ) -> list[int]:
+        """把僵尸 Run 置为 `timeout`，返回被回收的 run_id 列表（计划第 706 行）。
+
+        必须经状态机判定，不能直接赋值 status —— 否则"终态不可再改"这条
+        就没有机制保障了。
+        """
+        from app.analysis.state_machine import StateMachine
+
+        reclaimed: list[int] = []
+        for run in self.find_zombie_runs(
+            timeout_seconds=timeout_seconds, now=now, project_id=project_id
+        ):
+            machine = StateMachine(
+                status=run.status,
+                current_phase=run.current_phase,
+                phase_history=run.phase_history,
+            )
+            try:
+                machine.transition(enums.AGENT_RUN_TIMEOUT, reason="heartbeat_lost")
+            except Exception:  # noqa: BLE001 - 非法转移说明状态已被别处改过
+                # 刻意跳过这一条而不是中断整轮回收：一条坏数据不该让其余僵尸
+                # Run 都收不回来。但也**不静默**，记一条 warning 留下痕迹。
+                logger.warning("跳过无法转移的 Run %s（当前 %s）", run.id, run.status)
+                continue
+            run.status = machine.status
+            run.phase_history = machine.phase_history
+            run.finished_at = now or datetime.now(timezone.utc)
+            metadata = dict(run.run_metadata or {})
+            metadata["stop_reason"] = "timeout"
+            metadata["note"] = "Worker 心跳丢失，Run 已被回收为 timeout"
+            run.run_metadata = metadata
+            run.error = run.error or "heartbeat lost"
+            reclaimed.append(int(run.id))
+        return reclaimed
+
+    # ---------- 状态写入 ----------
+
+    def apply_status(
+        self,
+        project_id: int,
+        run_id: int,
+        *,
+        target: str,
+        reason: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> bool:
+        """经状态机写入新状态。非法转移会抛错，不静默改。"""
+        from app.analysis.state_machine import StateMachine
+
+        run = self.get(project_id, run_id)
+        if run is None:
+            return False
+
+        machine = StateMachine(
+            status=run.status,
+            current_phase=run.current_phase,
+            phase_history=run.phase_history,
+        )
+        machine.transition(target, reason=reason)
+
+        run.status = machine.status
+        run.phase_history = machine.phase_history
+        if target in enums.AGENT_RUN_TERMINAL_STATES:
+            run.finished_at = datetime.now(timezone.utc)
+        if metadata is not None:
+            run.run_metadata = metadata
+        if error is not None:
+            run.error = error
+        return True
+
+    def apply_progress(
+        self,
+        project_id: int,
+        run_id: int,
+        *,
+        current_phase: str | None = None,
+        phase_history: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        """写入阶段进度（与 status 正交，计划第 354 行）。"""
+        run = self.get(project_id, run_id)
+        if run is None:
+            return False
+        if current_phase is not None:
+            run.current_phase = current_phase
+        if phase_history is not None:
+            run.phase_history = phase_history
+        return True
     def append_model_call(self, project_id: int, run_id: int, call: dict[str, Any]) -> bool:
         """向 `model_calls` 追加一条记录。
 

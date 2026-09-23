@@ -1,0 +1,327 @@
+"""Run 执行器：状态流转 + 可靠性机制（计划第 679–731 行）。
+
+把阶段 08 的机制集中在一处，供 Celery Worker（阶段 08）与 Pipeline（阶段 09）复用：
+
+    execute_run(...) 的职责
+      1. 幂等：相同键且已有 completed → 直接复用，不重复执行/计费
+      2. 状态：queued → running →（completed / partial_success / failed / timeout / cancelled）
+      3. 心跳：执行前后更新 last_heartbeat
+      4. 取消：阶段边界检查 cancel_requested
+      5. 重试：可重试错误指数退避，最多 3 次
+      6. 降级：重试耗尽后 L3→L2→L1，全败则纯规则 L0 报告 + partial_success
+      7. 失败不静默：任一阶段失败且重试无果 → failed 并写明阶段与原因
+
+**真正的分析逻辑由调用方注入**（阶段 09 的 pipeline）。本模块只保证
+"怎么跑、跑失败了怎么办"，不掺业务。
+"""
+
+from __future__ import annotations
+
+import random
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
+
+from app.analysis.heartbeat import (
+    DEFAULT_HEARTBEAT_TIMEOUT_SECONDS,
+    CancelledError,
+    check_cancelled,
+    validate_heartbeat_timeout,
+)
+from app.analysis.idempotency import (
+    ErrorKind,
+    NonRetryableError,
+    classify_error,
+    make_idempotency_key,
+)
+from app.analysis.retry import RetryPolicy, call_with_fallback
+from app.analysis.state_machine import IllegalTransitionError, StateMachine
+from app.models import enums
+from app.policy import STOP_MODEL_UNAVAILABLE
+
+
+@dataclass
+class RunRequest:
+    """一次分析请求。幂等键由它算出。"""
+
+    project_id: int
+    source_id: int
+    time_start: datetime
+    time_end: datetime
+    domain_id: str
+    domain_version: str
+    filters: dict[str, Any] = field(default_factory=dict)
+    start_tier: str = "L2"
+    run_input: dict[str, Any] | None = None
+
+    def idempotency_key(self) -> str:
+        return make_idempotency_key(
+            project_id=self.project_id,
+            source_id=self.source_id,
+            time_start=self.time_start,
+            time_end=self.time_end,
+            filters=self.filters,
+            domain_id=self.domain_id,
+            domain_version=self.domain_version,
+        )
+
+
+@dataclass
+class RunOutcome:
+    """执行结果，可直接用于 API 响应与 Run 落库。"""
+
+    run_id: int
+    status: str
+    reused: bool = False
+    #: 纯规则 L0 报告（模型全不可用时）
+    used_rules_only: bool = False
+    stop_reason: str | None = None
+    error: str | None = None
+    value: Any = None
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "run_id": self.run_id,
+            "status": self.status,
+            "reused": self.reused,
+            "used_rules_only": self.used_rules_only,
+        }
+        if self.stop_reason:
+            payload["stop_reason"] = self.stop_reason
+        if self.error:
+            payload["error"] = self.error
+        return payload
+
+
+def create_run(
+    run_repository: Any, request: RunRequest
+) -> tuple[int, str, bool]:
+    """创建 Run 并**立即返回** `(run_id, status, reused)`（计划第 731 行验收）。
+
+    相同幂等键且已有 `completed` → 返回那个 Run 并标 `reused=True`，
+    **不重复执行、不重复计费**（计划第 703 行）。
+    """
+    key = request.idempotency_key()
+
+    reusable = run_repository.find_reusable(request.project_id, key)
+    if reusable is not None:
+        return int(reusable.id), reusable.status, True
+
+    run = run_repository.create_queued(
+        request.project_id,
+        source_id=request.source_id,
+        idempotency_key=key,
+        run_input=request.run_input,
+    )
+    # 必须 flush 才能拿到自增 id —— 计划第 731 行要求"立即返回 run_id"，
+    # 不 flush 的话 `run.id` 还是 None，返回值就是个空壳。
+    session = getattr(run_repository, "session", None)
+    if session is not None:
+        session.flush()
+    return int(run.id), run.status, False
+
+
+def _last_error_from(outcome: Any) -> str | None:
+    """从降级结果里取出最后一次尝试的错误原文（含异常类型名）。
+
+    结构是嵌套的：`attempts[i]["retry"]["last_error"]` 才是形如
+    `InputFormatError: 日志格式不认识` 的那一层；只读外层只会拿到 error_kind
+    （如 `input`），丢掉类型名后排障时看不出是哪个异常。
+    """
+    if outcome is None:
+        return None
+    payload = outcome.as_dict()
+
+    for attempt in reversed(payload.get("attempts") or []):
+        retry = attempt.get("retry") or {}
+        if retry.get("last_error"):
+            return str(retry["last_error"])
+        if attempt.get("error"):
+            return str(attempt["error"])
+
+    if payload.get("last_error"):
+        return str(payload["last_error"])
+    return None
+
+
+class RunExecutor:
+    """执行一个已创建的 Run，负责全部可靠性机制。"""
+
+    def __init__(
+        self,
+        *,
+        run_repository: Any,
+        heartbeat_timeout_seconds: int = DEFAULT_HEARTBEAT_TIMEOUT_SECONDS,
+        retry_policy: RetryPolicy | None = None,
+        sleep: Callable[[float], None] | None = None,
+        rng: random.Random | None = None,
+        now: Callable[[], datetime] | None = None,
+    ) -> None:
+        validate_heartbeat_timeout(heartbeat_timeout_seconds)
+        self.runs = run_repository
+        self.heartbeat_timeout_seconds = heartbeat_timeout_seconds
+        self.retry_policy = retry_policy or RetryPolicy()
+        self.sleep = sleep
+        self.rng = rng
+        self._now = now or (lambda: datetime.now(timezone.utc))
+
+    # ---------- 心跳 / 取消 ----------
+
+    def heartbeat(self, project_id: int, run_id: int) -> None:
+        self.runs.touch_heartbeat(project_id, run_id, at=self._now())
+
+    def check_cancel(self, project_id: int, run_id: int) -> None:
+        """阶段边界与每次调用前的检查点（计划第 709 行）。"""
+        check_cancelled(cancel_requested=self.runs.is_cancel_requested(project_id, run_id))
+
+    # ---------- 主流程 ----------
+
+    def execute(
+        self,
+        *,
+        project_id: int,
+        run_id: int,
+        attempt_tier: Callable[[str], Any],
+        start_tier: str,
+        rules_only_fallback: Callable[[], Any] | None = None,
+    ) -> RunOutcome:
+        """执行 Run。任何路径都必须以明确状态收尾，不留 running 悬挂。"""
+        # ① queued → running
+        try:
+            self.runs.apply_status(project_id, run_id, target=enums.AGENT_RUN_RUNNING)
+        except IllegalTransitionError as exc:
+            # 状态已被别处改过（例如已被取消/回收）：如实返回，不强行覆盖
+            current = self._current_status(project_id, run_id)
+            return RunOutcome(
+                run_id=run_id,
+                status=current,
+                error=f"无法进入 running：{exc}",
+            )
+
+        self.heartbeat(project_id, run_id)
+        machine = StateMachine(status=enums.AGENT_RUN_RUNNING)
+
+        try:
+            self.check_cancel(project_id, run_id)
+
+            outcome = call_with_fallback(
+                lambda tier: attempt_tier(tier),
+                start_tier=start_tier,
+                rules_only_fallback=rules_only_fallback,
+                retry_policy=self.retry_policy,
+                sleep=self.sleep,
+                rng=self.rng,
+            )
+
+            self.heartbeat(project_id, run_id)
+            self.check_cancel(project_id, run_id)
+
+            if outcome.ok and not outcome.used_rules_only:
+                target = enums.AGENT_RUN_COMPLETED
+                stop_reason = None
+                error_message = None
+            elif outcome.ok and outcome.used_rules_only:
+                # 模型全不可用 → 纯规则报告：**必须**标 partial_success 并写明原因
+                target = enums.AGENT_RUN_PARTIAL_SUCCESS
+                stop_reason = STOP_MODEL_UNAVAILABLE
+                error_message = "全部模型等级不可用，已输出纯规则报告"
+            else:
+                # 全部等级失败且没有规则兜底
+                target = enums.AGENT_RUN_FAILED
+                stop_reason = outcome.stop_reason or STOP_MODEL_UNAVAILABLE
+                # 从尝试历史里取出真正的错误原文。
+                # 只落库不带回的话，调用方拿到的失败结果是"没有原因的失败"——
+                # 页面只能显示"失败了"，排障得去翻库，正是红线 4 要避免的含糊。
+                error_message = _last_error_from(outcome)
+
+            metadata = self._metadata(machine, stop_reason, outcome)
+            self.runs.apply_status(
+                project_id,
+                run_id,
+                target=target,
+                reason=stop_reason,
+                metadata=metadata,
+                error=error_message,
+            )
+
+            return RunOutcome(
+                run_id=run_id,
+                status=target,
+                used_rules_only=outcome.used_rules_only,
+                stop_reason=stop_reason,
+                error=error_message,
+                value=outcome.value,
+                attempts=outcome.as_dict()["attempts"],
+                metadata=metadata,
+            )
+
+        except CancelledError:
+            machine.transition(enums.AGENT_RUN_CANCELLED, reason="cancel_requested")
+            metadata = self._metadata(machine, "cancelled", None)
+            self.runs.apply_status(
+                project_id,
+                run_id,
+                target=enums.AGENT_RUN_CANCELLED,
+                reason="cancel_requested",
+                metadata=metadata,
+            )
+            return RunOutcome(
+                run_id=run_id, status=enums.AGENT_RUN_CANCELLED, stop_reason="cancelled"
+            )
+
+        except NonRetryableError as exc:
+            # 计划第 728 行：失败不静默 —— 置 failed 并写明原因
+            return self._fail(project_id, run_id, machine, exc)
+
+        except Exception as exc:  # noqa: BLE001 - 任何未预期异常也必须明确收尾
+            return self._fail(project_id, run_id, machine, exc)
+
+    # ---------- 内部 ----------
+
+    def _fail(
+        self, project_id: int, run_id: int, machine: StateMachine, exc: BaseException
+    ) -> RunOutcome:
+        kind = classify_error(exc)
+        message = f"{type(exc).__name__}: {exc}"
+        try:
+            machine.transition(enums.AGENT_RUN_FAILED, reason=kind)
+            self.runs.apply_status(
+                project_id,
+                run_id,
+                target=enums.AGENT_RUN_FAILED,
+                reason=kind,
+                error=message,
+                metadata=self._metadata(machine, kind, None),
+            )
+            status = enums.AGENT_RUN_FAILED
+        except IllegalTransitionError:
+            # 已经处于终态：不要强行覆盖，如实返回当前状态
+            status = self._current_status(project_id, run_id)
+        return RunOutcome(
+            run_id=run_id, status=status, stop_reason=kind, error=message
+        )
+
+    def _metadata(
+        self, machine: StateMachine, stop_reason: str | None, outcome: Any
+    ) -> dict[str, Any]:
+        metadata: dict[str, Any] = {
+            "completed_phases": machine.completed_phases(),
+            "skipped_phases": machine.skipped_phases(),
+        }
+        if stop_reason:
+            metadata["stop_reason"] = stop_reason
+            metadata["note"] = (
+                "分析因预算/时限/模型不可用中断，结果可能不完整"
+                if stop_reason != ErrorKind.INPUT
+                else "分析因输入问题未完成"
+            )
+        if outcome is not None:
+            metadata["attempts"] = outcome.as_dict()["attempts"]
+        return metadata
+
+    def _current_status(self, project_id: int, run_id: int) -> str:
+        run = self.runs.get(project_id, run_id)
+        return str(run.status) if run is not None else "unknown"
