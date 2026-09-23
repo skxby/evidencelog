@@ -1,0 +1,41 @@
+# 阶段 01 依赖。装完后会生成 requirements.lock.txt（pip freeze 的精确版本），
+# 部署与复现以 lock 文件为准，本文件只表达「意图 + 下限」。
+
+# --- Web / API ---
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+
+# --- ORM / 迁移 ---
+# 用 SQLAlchemy 2.0 原生写法（Mapped + select()），不混用 Flask 风格 API
+sqlalchemy>=2.0
+alembic
+psycopg[binary]
+
+# --- 异步队列 ---
+celery[redis]
+redis
+
+# --- 配置 / 结构化日志 ---
+pydantic-settings
+structlog
+
+# --- 鉴权 ---
+# 直接用 bcrypt，不用 passlib（passlib 自 2020 年起无人维护，
+# 且与 bcrypt>=4.1 组合会抛 "error reading bcrypt version"）
+bcrypt
+pyjwt
+
+# --- HTTP 客户端（Model Gateway 调用 OpenAI 兼容端点）---
+httpx
+
+# --- 时间解析（syslog / dmesg 的时间戳千奇百怪，不自己造轮子）---
+python-dateutil
+
+# --- 测试 ---
+pytest
+pytest-asyncio
+# 注：计划里提到 pytest-celery 作为可选项。它默认会拉起一个 Docker 托管的
+# worker 容器，测试期会额外拉镜像。计划同时给了「或直接测函数」的替代路径，
+# 阶段 01 先走后者，等阶段 08 真正需要端到端验证 Worker 时再决定是否引入。

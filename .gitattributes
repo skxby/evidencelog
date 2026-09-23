@@ -1,0 +1,16 @@
+# 统一换行符：避免 Windows 上的 CRLF 进到 Linux 容器里，
+# 那会让 shell 脚本的 shebang 失效、diff 变得不可读。
+* text=auto eol=lf
+
+# 二进制文件不做转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+
+# Windows 批处理必须保留 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf

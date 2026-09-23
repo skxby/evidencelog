@@ -1,0 +1,53 @@
+# 阶段 01：只起基础设施（PostgreSQL + Redis）。
+# web / worker / beat 在阶段 14 收尾时加入本文件。
+# 端口一律绑 127.0.0.1，不暴露到局域网——与「只读 + 本地」的定位一致。
+
+name: logagent
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: logagent-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: logagent
+      POSTGRES_PASSWORD: logagent_dev_pw
+      POSTGRES_DB: logagent
+      # 容器内统一 UTC；应用层自己负责按 DEFAULT_TIMEZONE 解析后再转 UTC
+      TZ: UTC
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U logagent -d logagent"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: logagent-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60"
+      - "1"
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  pgdata:
+  redisdata:
