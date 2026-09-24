@@ -273,6 +273,8 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
     )
     disk = real.get("disk") or {}
     db_plain = int((real.get("counts") or {}).get("db_events_with_plaintext") or 0)
+    # "没读到文件"和"脱敏没做"必须能分辨：前者是证据采集没到位，后者才是真缺陷。
+    disk_note = f"；{disk['note']}" if disk.get("note") else ""
     out["masking_disk_db"] = (
         "达标"
         if disk.get("canary_email_on_disk") is False
@@ -281,7 +283,8 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         else "未达标",
         f"注入 canary 后：落盘文件无原文（email={disk.get('canary_email_on_disk')}、"
         f"secret={disk.get('canary_secret_on_disk')}）、含 {disk.get('email_markers')} 个 [EMAIL_] + "
-        f"{disk.get('secret_markers')} 个 [SECRET_] 标记、库内含原文事件 {db_plain} 条",
+        f"{disk.get('secret_markers')} 个 [SECRET_] 标记、库内含原文事件 {db_plain} 条"
+        f"（读取来源 {disk.get('source') or '未知'}）{disk_note}",
     )
     neg = uploads.get("negative_sample") or {}
     neg_parse = neg.get("parse") or {}

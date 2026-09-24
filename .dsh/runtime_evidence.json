@@ -1,27 +1,27 @@
 {
- "generated_at": "2026-09-24T22:10:55",
- "base": "http://127.0.0.1:8001",
+ "generated_at": "2026-09-24T23:13:09",
+ "base": "http://127.0.0.1:8000",
  "scenarios": [
   {
    "name": "evidence-real-corpus",
    "source": "logs/Mac_2k.log",
    "canary_injected": true,
-   "project_id": 7873,
-   "data_source_id": 5640,
-   "run_id": 3566,
+   "project_id": 9906,
+   "data_source_id": 7120,
+   "run_id": 4616,
    "create_run_http": 202,
-   "create_run_seconds": 0.13,
+   "create_run_seconds": 0.036,
    "create_run_body": {
-    "run_id": 3566,
+    "run_id": 4616,
     "status": "queued",
     "reused": false
    },
    "upload_http": 200,
    "upload": {
-    "data_source_id": 5640,
+    "data_source_id": 7120,
     "created_data_source": true,
     "format": "txt",
-    "stored_filename": "20260924130059517351_Mac_2k_with_canary.log",
+    "stored_filename": "20260924151122026511_Mac_2k_with_canary.log",
     "events_persisted": 2000,
     "parse": {
      "parser": "txt",
@@ -49,33 +49,33 @@
     "current_phase": null,
     "phase_history": [
      {
-      "at": "2026-09-24T13:01:00.002511+00:00",
+      "at": "2026-09-24T15:11:22.474321+00:00",
       "from": "queued",
       "phase": "running",
       "status": "running"
      },
      {
-      "at": "2026-09-24T13:01:50.377138+00:00",
+      "at": "2026-09-24T15:11:46.456666+00:00",
       "from": "running",
       "phase": "completed",
       "status": "completed"
      }
     ],
-    "started_at": "2026-09-24 13:01:00.002553+00:00",
-    "finished_at": "2026-09-24 13:01:50.377162+00:00",
-    "last_heartbeat": "2026-09-24 13:01:50.370548+00:00",
+    "started_at": "2026-09-24 15:11:22.474342+00:00",
+    "finished_at": "2026-09-24 15:11:46.456693+00:00",
+    "last_heartbeat": "2026-09-24 15:11:46.451468+00:00",
     "model_calls": [
      {
-      "cost": 0.027788,
+      "cost": 0.022575,
       "tier": "L3",
       "model": "deepseek-flash",
       "status": "ok",
-      "call_id": "c_18b88ac612a7",
-      "timestamp": "2026-09-24T13:01:44.668180+00:00",
-      "tokens_input": 6380,
+      "call_id": "c_664fd85f70e9",
+      "timestamp": "2026-09-24T15:11:41.069664+00:00",
+      "tokens_input": 6415,
       "cached_tokens": 0,
-      "tokens_output": 5352,
-      "reasoning_tokens": 1706
+      "tokens_output": 4040,
+      "reasoning_tokens": 1418
      }
     ],
     "tool_usage": {
@@ -87,157 +87,157 @@
         "input_count": 2000,
         "matched_count": 144,
         "matched_event_ids": [
-         154308,
-         154309,
-         154334,
-         154343,
-         154349,
-         154366,
-         154400,
-         154401,
-         154408,
-         154409,
-         154412,
-         154415,
-         154417,
-         154419,
-         154421,
-         154422,
-         154423,
-         154426,
-         154427,
-         154428,
-         154430,
-         154443,
-         154460,
-         154468,
-         154478,
-         154488,
-         154492,
-         154517,
-         154540,
-         154561,
-         154562,
-         154580,
-         154665,
-         154711,
-         154730,
-         154731,
-         154732,
-         154737,
-         154738,
-         154752,
-         154816,
-         154817,
-         154833,
-         154841,
-         154844,
-         154847,
-         154859,
-         154869,
-         154892,
-         154914,
-         154918,
-         154919,
-         154928,
-         154959,
-         154974,
-         155029,
-         155034,
-         155048,
-         155062,
-         155069,
-         155076,
-         155084,
-         155091,
-         155121,
-         155125,
-         155171,
-         155184,
-         155185,
-         155208,
-         155212,
-         155214,
-         155224,
-         155275,
-         155276,
-         155355,
-         155356,
-         155360,
-         155361,
-         155373,
-         155379,
-         155381,
-         155382,
-         155385,
-         155434,
-         155438,
-         155447,
-         155448,
-         155481,
-         155525,
-         155527,
-         155535,
-         155540,
-         155541,
-         155577,
-         155581,
-         155592,
-         155597,
-         155605,
-         155619,
-         155621,
-         155636,
-         155652,
-         155669,
-         155688,
-         155689,
-         155694,
-         155704,
-         155732,
-         155746,
-         155747,
-         155790,
-         155793,
-         155795,
-         155801,
-         155803,
-         155805,
-         155806,
-         155807,
-         155811,
-         155817,
-         155821,
-         155825,
-         155930,
-         155943,
-         155944,
-         155946,
-         156030,
-         156032,
-         156039,
-         156055,
-         156057,
-         156092,
-         156095,
-         156096,
-         156098,
-         156101,
-         156111,
-         156116,
-         156121,
-         156158,
-         156166,
-         156184,
-         156204,
-         156218
+         187980,
+         187981,
+         188006,
+         188015,
+         188021,
+         188038,
+         188072,
+         188073,
+         188080,
+         188081,
+         188084,
+         188087,
+         188089,
+         188091,
+         188093,
+         188094,
+         188095,
+         188098,
+         188099,
+         188100,
+         188102,
+         188115,
+         188132,
+         188140,
+         188150,
+         188160,
+         188164,
+         188189,
+         188212,
+         188233,
+         188234,
+         188252,
+         188337,
+         188383,
+         188402,
+         188403,
+         188404,
+         188409,
+         188410,
+         188424,
+         188488,
+         188489,
+         188505,
+         188513,
+         188516,
+         188519,
+         188531,
+         188541,
+         188564,
+         188586,
+         188590,
+         188591,
+         188600,
+         188631,
+         188646,
+         188701,
+         188706,
+         188720,
+         188734,
+         188741,
+         188748,
+         188756,
+         188763,
+         188793,
+         188797,
+         188843,
+         188856,
+         188857,
+         188880,
+         188884,
+         188886,
+         188896,
+         188947,
+         188948,
+         189027,
+         189028,
+         189032,
+         189033,
+         189045,
+         189051,
+         189053,
+         189054,
+         189057,
+         189106,
+         189110,
+         189119,
+         189120,
+         189153,
+         189197,
+         189199,
+         189207,
+         189212,
+         189213,
+         189249,
+         189253,
+         189264,
+         189269,
+         189277,
+         189291,
+         189293,
+         189308,
+         189324,
+         189341,
+         189360,
+         189361,
+         189366,
+         189376,
+         189404,
+         189418,
+         189419,
+         189462,
+         189465,
+         189467,
+         189473,
+         189475,
+         189477,
+         189478,
+         189479,
+         189483,
+         189489,
+         189493,
+         189497,
+         189602,
+         189615,
+         189616,
+         189618,
+         189702,
+         189704,
+         189711,
+         189727,
+         189729,
+         189764,
+         189767,
+         189768,
+         189770,
+         189773,
+         189783,
+         189788,
+         189793,
+         189830,
+         189838,
+         189856,
+         189876,
+         189890
         ],
         "matched_without_id": 0,
         "skipped_no_timestamp": 0
        },
        "version": "1.0.0",
        "items_in": 2000,
-       "elapsed_ms": 0.21
+       "elapsed_ms": 0.222
       }
      ],
      "stats_calculator": [
@@ -264,15 +264,24 @@
        },
        "version": "1.0.0",
        "items_in": 2000,
-       "elapsed_ms": 3.199
+       "elapsed_ms": 3.065
       }
      ]
     },
-    "tokens_input": 6380,
-    "tokens_output": 5352,
-    "cost_actual": "0.027788",
+    "tokens_input": 6415,
+    "tokens_output": 4040,
+    "cost_actual": "0.022575",
     "error": null,
     "run_metadata": {
+     "notes": [
+      "analyzers 产出 28 条候选异常",
+      "confirmed 知识 1 条参与增强",
+      "28 条异常附上了对应的 runbook",
+      "初始 65417 tokens 超出总预算 8000，开始按序压缩",
+      "incidents 按预算截断至 879 tokens",
+      "anomalies 按预算截断至 1175 tokens",
+      "samples 按预算截断至 4716 tokens"
+     ],
      "attempts": [
       {
        "ok": true,
@@ -294,39 +303,40 @@
        "error_kind": null
       }
      ],
-     "trace_id": "8e8fde39326f4a4a952a1cba93e667ec",
-     "insight_count": 15,
-     "context_tokens": 6971,
-     "evidence_count": 15,
+     "trace_id": "a780039da9f0413683222fbb5824c58c",
+     "insight_count": 12,
+     "context_tokens": 6996,
+     "evidence_count": 12,
      "model_attempts": [
       {
-       "cost": 0.027788,
+       "cost": 0.022575,
        "round": 1,
-       "tokens_input": 6380,
-       "tokens_output": 5352
+       "tokens_input": 6415,
+       "tokens_output": 4040
       }
      ],
      "skipped_phases": [],
      "used_rules_only": false,
-     "completed_phases": []
+     "completed_phases": [],
+     "evidence_rejections": 0
     }
    },
-   "trace_id": "8e8fde39326f4a4a952a1cba93e667ec",
+   "trace_id": "a780039da9f0413683222fbb5824c58c",
    "project": {
     "budget_total": 10.0,
-    "budget_used": 0.0278
+    "budget_used": 0.0226
    },
    "counts": {
     "events": 2000,
     "metric_events": 0,
     "event_groups": 1848,
-    "incidents": 593,
+    "incidents": 587,
     "events_with_group": 2000,
     "events_with_incident": 2000,
-    "insights_with_incident": 15,
-    "insights": 15,
-    "insights_with_runbook": 15,
-    "evidences": 15,
+    "insights_with_incident": 12,
+    "insights": 12,
+    "insights_with_runbook": 12,
+    "evidences": 12,
     "fact_without_evidence": 0,
     "cited_event_ids_not_in_run": [],
     "db_events_with_plaintext": 0
@@ -340,157 +350,157 @@
        "input_count": 2000,
        "matched_count": 144,
        "matched_event_ids": [
-        154308,
-        154309,
-        154334,
-        154343,
-        154349,
-        154366,
-        154400,
-        154401,
-        154408,
-        154409,
-        154412,
-        154415,
-        154417,
-        154419,
-        154421,
-        154422,
-        154423,
-        154426,
-        154427,
-        154428,
-        154430,
-        154443,
-        154460,
-        154468,
-        154478,
-        154488,
-        154492,
-        154517,
-        154540,
-        154561,
-        154562,
-        154580,
-        154665,
-        154711,
-        154730,
-        154731,
-        154732,
-        154737,
-        154738,
-        154752,
-        154816,
-        154817,
-        154833,
-        154841,
-        154844,
-        154847,
-        154859,
-        154869,
-        154892,
-        154914,
-        154918,
-        154919,
-        154928,
-        154959,
-        154974,
-        155029,
-        155034,
-        155048,
-        155062,
-        155069,
-        155076,
-        155084,
-        155091,
-        155121,
-        155125,
-        155171,
-        155184,
-        155185,
-        155208,
-        155212,
-        155214,
-        155224,
-        155275,
-        155276,
-        155355,
-        155356,
-        155360,
-        155361,
-        155373,
-        155379,
-        155381,
-        155382,
-        155385,
-        155434,
-        155438,
-        155447,
-        155448,
-        155481,
-        155525,
-        155527,
-        155535,
-        155540,
-        155541,
-        155577,
-        155581,
-        155592,
-        155597,
-        155605,
-        155619,
-        155621,
-        155636,
-        155652,
-        155669,
-        155688,
-        155689,
-        155694,
-        155704,
-        155732,
-        155746,
-        155747,
-        155790,
-        155793,
-        155795,
-        155801,
-        155803,
-        155805,
-        155806,
-        155807,
-        155811,
-        155817,
-        155821,
-        155825,
-        155930,
-        155943,
-        155944,
-        155946,
-        156030,
-        156032,
-        156039,
-        156055,
-        156057,
-        156092,
-        156095,
-        156096,
-        156098,
-        156101,
-        156111,
-        156116,
-        156121,
-        156158,
-        156166,
-        156184,
-        156204,
-        156218
+        187980,
+        187981,
+        188006,
+        188015,
+        188021,
+        188038,
+        188072,
+        188073,
+        188080,
+        188081,
+        188084,
+        188087,
+        188089,
+        188091,
+        188093,
+        188094,
+        188095,
+        188098,
+        188099,
+        188100,
+        188102,
+        188115,
+        188132,
+        188140,
+        188150,
+        188160,
+        188164,
+        188189,
+        188212,
+        188233,
+        188234,
+        188252,
+        188337,
+        188383,
+        188402,
+        188403,
+        188404,
+        188409,
+        188410,
+        188424,
+        188488,
+        188489,
+        188505,
+        188513,
+        188516,
+        188519,
+        188531,
+        188541,
+        188564,
+        188586,
+        188590,
+        188591,
+        188600,
+        188631,
+        188646,
+        188701,
+        188706,
+        188720,
+        188734,
+        188741,
+        188748,
+        188756,
+        188763,
+        188793,
+        188797,
+        188843,
+        188856,
+        188857,
+        188880,
+        188884,
+        188886,
+        188896,
+        188947,
+        188948,
+        189027,
+        189028,
+        189032,
+        189033,
+        189045,
+        189051,
+        189053,
+        189054,
+        189057,
+        189106,
+        189110,
+        189119,
+        189120,
+        189153,
+        189197,
+        189199,
+        189207,
+        189212,
+        189213,
+        189249,
+        189253,
+        189264,
+        189269,
+        189277,
+        189291,
+        189293,
+        189308,
+        189324,
+        189341,
+        189360,
+        189361,
+        189366,
+        189376,
+        189404,
+        189418,
+        189419,
+        189462,
+        189465,
+        189467,
+        189473,
+        189475,
+        189477,
+        189478,
+        189479,
+        189483,
+        189489,
+        189493,
+        189497,
+        189602,
+        189615,
+        189616,
+        189618,
+        189702,
+        189704,
+        189711,
+        189727,
+        189729,
+        189764,
+        189767,
+        189768,
+        189770,
+        189773,
+        189783,
+        189788,
+        189793,
+        189830,
+        189838,
+        189856,
+        189876,
+        189890
        ],
        "matched_without_id": 0,
        "skipped_no_timestamp": 0
       },
       "version": "1.0.0",
       "items_in": 2000,
-      "elapsed_ms": 0.21
+      "elapsed_ms": 0.222
      }
     ],
     "stats_calculator": [
@@ -517,18 +527,18 @@
       },
       "version": "1.0.0",
       "items_in": 2000,
-      "elapsed_ms": 3.199
+      "elapsed_ms": 3.065
      }
     ]
    },
-   "staged_candidates": 4,
+   "staged_candidates": 44,
    "insights": [
     {
-     "id": 884,
+     "id": 1149,
      "type": "fact",
      "severity": "high",
-     "confidence": 0.9,
-     "title": "窗口内存在多起主机级网络不可达/连接失败",
+     "confidence": 0.95,
+     "title": "网络栈连接失败在窗口内高频重复出现",
      "run_metadata": {
       "runbooks": [
        {
@@ -548,251 +558,11 @@
      }
     },
     {
-     "id": 885,
-     "type": "fact",
-     "severity": "medium",
-     "confidence": 0.88,
-     "title": "mDNSResponder 本地套接字连接被拒（Operation not permitted）",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 886,
-     "type": "fact",
-     "severity": "medium",
-     "confidence": 0.85,
-     "title": "SOS 账户身份未设置导致同步失败（Code=1035）反复出现",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 887,
-     "type": "fact",
-     "severity": "low",
-     "confidence": 0.82,
-     "title": "ISGenerateImageOp 图像合成失败批量出现",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 888,
-     "type": "fact",
-     "severity": "low",
-     "confidence": 0.8,
-     "title": "NetworkAnalyticsEngine 主键哈希失败并丢弃 journal 记录",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 889,
-     "type": "fact",
-     "severity": "low",
-     "confidence": 0.8,
-     "title": "pid 445 未能及时处理 datagram ping 导致超时",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 890,
-     "type": "fact",
-     "severity": "medium",
-     "confidence": 0.8,
-     "title": "存在断言失败（assertion failed / ASSERTION FAILED）类崩溃迹象",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 891,
-     "type": "fact",
-     "severity": "high",
-     "confidence": 0.85,
-     "title": "PBRequester 请求超时与离线错误",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 892,
+     "id": 1150,
      "type": "inference",
      "severity": "high",
-     "confidence": 0.75,
-     "title": "网络栈退化是本时间窗口的主线异常",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 893,
-     "type": "inference",
-     "severity": "medium",
-     "confidence": 0.7,
-     "title": "高严重度 ProcessCrash 异常中至少 4 条疑似关键词误报",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 894,
-     "type": "inference",
-     "severity": "low",
-     "confidence": 0.65,
-     "title": "ProcessCrash 事故均为 low 且 root_cause 未判定",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 895,
-     "type": "inference",
-     "severity": "medium",
      "confidence": 0.6,
-     "title": "声明的时间窗口与事件时间戳严重不一致",
+     "title": "被标记为 ProcessCrash 的 high 异常多为关键字误报",
      "run_metadata": {
       "runbooks": [
        {
@@ -812,11 +582,179 @@
      }
     },
     {
-     "id": 896,
+     "id": 1151,
+     "type": "fact",
+     "severity": "medium",
+     "confidence": 0.9,
+     "title": "存在一条未解析内部地址的进程异常日志",
+     "run_metadata": {
+      "runbooks": [
+       {
+        "id": "rb_crash_001",
+        "steps": [
+         "确认崩溃进程名、PID 与崩溃时间点",
+         "检查是否有 core dump 生成，路径与大小",
+         "查看崩溃前后同一进程的日志，确认是否有前置异常",
+         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
+         "核对近期是否有版本升级、依赖变更或配置改动",
+         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+        ],
+        "title": "进程崩溃处置",
+        "references": []
+       }
+      ]
+     }
+    },
+    {
+     "id": 1152,
+     "type": "fact",
+     "severity": "medium",
+     "confidence": 0.9,
+     "title": "com.apple.telemetry 断言失败短时间内重复出现",
+     "run_metadata": {
+      "runbooks": [
+       {
+        "id": "rb_crash_001",
+        "steps": [
+         "确认崩溃进程名、PID 与崩溃时间点",
+         "检查是否有 core dump 生成，路径与大小",
+         "查看崩溃前后同一进程的日志，确认是否有前置异常",
+         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
+         "核对近期是否有版本升级、依赖变更或配置改动",
+         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+        ],
+        "title": "进程崩溃处置",
+        "references": []
+       }
+      ]
+     }
+    },
+    {
+     "id": 1153,
+     "type": "fact",
+     "severity": "medium",
+     "confidence": 0.9,
+     "title": "DriverServices 取设备地址断言失败重复出现",
+     "run_metadata": {
+      "runbooks": [
+       {
+        "id": "rb_crash_001",
+        "steps": [
+         "确认崩溃进程名、PID 与崩溃时间点",
+         "检查是否有 core dump 生成，路径与大小",
+         "查看崩溃前后同一进程的日志，确认是否有前置异常",
+         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
+         "核对近期是否有版本升级、依赖变更或配置改动",
+         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+        ],
+        "title": "进程崩溃处置",
+        "references": []
+       }
+      ]
+     }
+    },
+    {
+     "id": 1154,
+     "type": "fact",
+     "severity": "medium",
+     "confidence": 0.9,
+     "title": "账户身份缺失导致 SOS 同步反复失败",
+     "run_metadata": {
+      "runbooks": [
+       {
+        "id": "rb_crash_001",
+        "steps": [
+         "确认崩溃进程名、PID 与崩溃时间点",
+         "检查是否有 core dump 生成，路径与大小",
+         "查看崩溃前后同一进程的日志，确认是否有前置异常",
+         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
+         "核对近期是否有版本升级、依赖变更或配置改动",
+         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+        ],
+        "title": "进程崩溃处置",
+        "references": []
+       }
+      ]
+     }
+    },
+    {
+     "id": 1155,
+     "type": "fact",
+     "severity": "low",
+     "confidence": 0.85,
+     "title": "NetworkAnalyticsEngine 主键哈希失败持续丢弃日志记录",
+     "run_metadata": {
+      "runbooks": [
+       {
+        "id": "rb_crash_001",
+        "steps": [
+         "确认崩溃进程名、PID 与崩溃时间点",
+         "检查是否有 core dump 生成，路径与大小",
+         "查看崩溃前后同一进程的日志，确认是否有前置异常",
+         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
+         "核对近期是否有版本升级、依赖变更或配置改动",
+         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+        ],
+        "title": "进程崩溃处置",
+        "references": []
+       }
+      ]
+     }
+    },
+    {
+     "id": 1156,
+     "type": "fact",
+     "severity": "low",
+     "confidence": 0.85,
+     "title": "图像合成失败（ISGenerateImageOp）重复出现",
+     "run_metadata": {
+      "runbooks": [
+       {
+        "id": "rb_crash_001",
+        "steps": [
+         "确认崩溃进程名、PID 与崩溃时间点",
+         "检查是否有 core dump 生成，路径与大小",
+         "查看崩溃前后同一进程的日志，确认是否有前置异常",
+         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
+         "核对近期是否有版本升级、依赖变更或配置改动",
+         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+        ],
+        "title": "进程崩溃处置",
+        "references": []
+       }
+      ]
+     }
+    },
+    {
+     "id": 1157,
+     "type": "inference",
+     "severity": "medium",
+     "confidence": 0.55,
+     "title": "网络不可达可能是上层多项失败的共同上游原因",
+     "run_metadata": {
+      "runbooks": [
+       {
+        "id": "rb_crash_001",
+        "steps": [
+         "确认崩溃进程名、PID 与崩溃时间点",
+         "检查是否有 core dump 生成，路径与大小",
+         "查看崩溃前后同一进程的日志，确认是否有前置异常",
+         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
+         "核对近期是否有版本升级、依赖变更或配置改动",
+         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+        ],
+        "title": "进程崩溃处置",
+        "references": []
+       }
+      ]
+     }
+    },
+    {
+     "id": 1158,
      "type": "possibility",
      "severity": "low",
-     "confidence": 0.45,
-     "title": "部分日志内容可能是历史/陈旧数据",
+     "confidence": 0.35,
+     "title": "无线子系统可能处于反复唤醒/超时重连状态",
      "run_metadata": {
       "runbooks": [
        {
@@ -836,11 +774,11 @@
      }
     },
     {
-     "id": 897,
+     "id": 1159,
      "type": "unknown",
      "severity": "medium",
-     "confidence": 0.3,
-     "title": "17.9% 错误率的构成与影响面无法判定",
+     "confidence": 0.2,
+     "title": "14 起 ProcessCrash 事故的根因未判定",
      "run_metadata": {
       "runbooks": [
        {
@@ -860,11 +798,11 @@
      }
     },
     {
-     "id": 898,
+     "id": 1160,
      "type": "unknown",
-     "severity": "low",
-     "confidence": 0.25,
-     "title": "DNS 配置读取失败事件的影响范围未知",
+     "severity": "medium",
+     "confidence": 0.15,
+     "title": "观测窗口元数据与实际日志时间范围不一致",
      "run_metadata": {
       "runbooks": [
        {
@@ -884,41 +822,42 @@
      }
     }
    ],
-   "narrative": "Run #3566（项目 7873，trace 8e8fde39326f4a4a952a1cba93e667ec） 状态 completed。\n开始于 2026-09-24T13:01:00.002553+00:00，耗时 50.4s。\n共调用模型 1 次，输入 6380 / 输出 5352 tokens，花费 ¥0.0278。\n分级花费：L3 1 次 ¥0.0278。\n调用工具 2 次。\n发生过 1 次模型降级。\n产出 15 条结论：\n  - [fact] 窗口内存在多起主机级网络不可达/连接失败（11 条证据）\n  - [fact] mDNSResponder 本地套接字连接被拒（Operation not permitted）（11 条证据）\n  - [fact] SOS 账户身份未设置导致同步失败（Code=1035）反复出现（10 条证据）\n  - [fact] ISGenerateImageOp 图像合成失败批量出现（14 条证据）\n  - [fact] NetworkAnalyticsEngine 主键哈希失败并丢弃 journal 记录（12 条证据）\n  - [fact] pid 445 未能及时处理 datagram ping 导致超时（8 条证据）\n  - [fact] 存在断言失败（assertion failed / ASSERTION FAILED）类崩",
-   "api_insights": 15,
+   "narrative": "Run #4616（项目 9906，trace a780039da9f0413683222fbb5824c58c） 状态 completed。\n开始于 2026-09-24T15:11:22.474342+00:00，耗时 24.0s。\n共调用模型 1 次，输入 6415 / 输出 4040 tokens，花费 ¥0.0226。\n分级花费：L3 1 次 ¥0.0226。\n调用工具 2 次。\n发生过 1 次模型降级。\n产出 12 条结论：\n  - [fact] 网络栈连接失败在窗口内高频重复出现（8 条证据）\n  - [inference] 被标记为 ProcessCrash 的 high 异常多为关键字误报（4 条证据）\n  - [fact] 存在一条未解析内部地址的进程异常日志（1 条证据）\n  - [fact] com.apple.telemetry 断言失败短时间内重复出现（2 条证据）\n  - [fact] DriverServices 取设备地址断言失败重复出现（2 条证据）\n  - [fact] 账户身份缺失导致 SOS 同步反复失败（7 条证据）\n  - [fact] NetworkAnalyticsEngine 主键哈希失败持续丢弃日志记录（8 条证据）\n  - [fact] 图像合成失败（ISGenerateImageOp）重复出现（6 条证据）\n  - [inf",
+   "api_insights": 12,
    "disk": {
-    "dir": "/app/data/uploads/7873",
+    "dir": "/app/data/uploads/9906",
     "files": [
-     "20260924130059517351_Mac_2k_with_canary.log"
+     "20260924151122026511_Mac_2k_with_canary.log"
     ],
     "canary_email_on_disk": false,
     "canary_secret_on_disk": false,
     "email_markers": 12,
     "secret_markers": 2,
-    "lines": 2000
+    "lines": 2000,
+    "source": "container"
    },
-   "staging_file_exists": false
+   "staging_file_exists": true
   },
   {
    "name": "evidence-crash-fixture",
    "source": "tests/datasets/crash/system.log",
    "canary_injected": false,
-   "project_id": 7874,
-   "data_source_id": 5641,
-   "run_id": 3567,
+   "project_id": 9907,
+   "data_source_id": 7121,
+   "run_id": 4617,
    "create_run_http": 202,
-   "create_run_seconds": 0.012,
+   "create_run_seconds": 0.011,
    "create_run_body": {
-    "run_id": 3567,
+    "run_id": 4617,
     "status": "queued",
     "reused": false
    },
    "upload_http": 200,
    "upload": {
-    "data_source_id": 5641,
+    "data_source_id": 7121,
     "created_data_source": true,
     "format": "txt",
-    "stored_filename": "20260924130152751231_system.log",
+    "stored_filename": "20260924151147168728_system.log",
     "events_persisted": 16,
     "parse": {
      "parser": "txt",
@@ -942,33 +881,33 @@
     "current_phase": null,
     "phase_history": [
      {
-      "at": "2026-09-24T13:01:52.778093+00:00",
+      "at": "2026-09-24T15:11:47.226821+00:00",
       "from": "queued",
       "phase": "running",
       "status": "running"
      },
      {
-      "at": "2026-09-24T13:02:20.044741+00:00",
+      "at": "2026-09-24T15:11:59.533192+00:00",
       "from": "running",
       "phase": "completed",
       "status": "completed"
      }
     ],
-    "started_at": "2026-09-24 13:01:52.778200+00:00",
-    "finished_at": "2026-09-24 13:02:20.044764+00:00",
-    "last_heartbeat": "2026-09-24 13:02:20.039028+00:00",
+    "started_at": "2026-09-24 15:11:47.226840+00:00",
+    "finished_at": "2026-09-24 15:11:59.533210+00:00",
+    "last_heartbeat": "2026-09-24 15:11:59.527666+00:00",
     "model_calls": [
      {
-      "cost": 0.013209,
+      "cost": 0.012060000000000001,
       "tier": "L3",
       "model": "deepseek-flash",
       "status": "ok",
-      "call_id": "c_544b5f50a52f",
-      "timestamp": "2026-09-24T13:02:19.976677+00:00",
-      "tokens_input": 1617,
+      "call_id": "c_8317ec0832f7",
+      "timestamp": "2026-09-24T15:11:59.423480+00:00",
+      "tokens_input": 1652,
       "cached_tokens": 0,
-      "tokens_output": 2898,
-      "reasoning_tokens": 1124
+      "tokens_output": 2602,
+      "reasoning_tokens": 1041
      }
     ],
     "tool_usage": {
@@ -985,7 +924,7 @@
        },
        "version": "1.0.0",
        "items_in": 16,
-       "elapsed_ms": 0.006
+       "elapsed_ms": 0.005
       }
      ],
      "stats_calculator": [
@@ -1012,15 +951,20 @@
        },
        "version": "1.0.0",
        "items_in": 16,
-       "elapsed_ms": 0.063
+       "elapsed_ms": 0.062
       }
      ]
     },
-    "tokens_input": 1617,
-    "tokens_output": 2898,
-    "cost_actual": "0.013209",
+    "tokens_input": 1652,
+    "tokens_output": 2602,
+    "cost_actual": "0.012060",
     "error": null,
     "run_metadata": {
+     "notes": [
+      "analyzers 产出 1 条候选异常",
+      "confirmed 知识 1 条参与增强",
+      "1 条异常附上了对应的 runbook"
+     ],
      "attempts": [
       {
        "ok": true,
@@ -1042,27 +986,28 @@
        "error_kind": null
       }
      ],
-     "trace_id": "db5e52a5ba4741d088ae4d902e465ae5",
+     "trace_id": "68ea39c343cf4e7cb33dcb407f00c9d4",
      "insight_count": 6,
-     "context_tokens": 1094,
+     "context_tokens": 1115,
      "evidence_count": 6,
      "model_attempts": [
       {
-       "cost": 0.013209,
+       "cost": 0.012060000000000001,
        "round": 1,
-       "tokens_input": 1617,
-       "tokens_output": 2898
+       "tokens_input": 1652,
+       "tokens_output": 2602
       }
      ],
      "skipped_phases": [],
      "used_rules_only": false,
-     "completed_phases": []
+     "completed_phases": [],
+     "evidence_rejections": 0
     }
    },
-   "trace_id": "db5e52a5ba4741d088ae4d902e465ae5",
+   "trace_id": "68ea39c343cf4e7cb33dcb407f00c9d4",
    "project": {
     "budget_total": 10.0,
-    "budget_used": 0.0132
+    "budget_used": 0.0121
    },
    "counts": {
     "events": 16,
@@ -1093,7 +1038,7 @@
       },
       "version": "1.0.0",
       "items_in": 16,
-      "elapsed_ms": 0.006
+      "elapsed_ms": 0.005
      }
     ],
     "stats_calculator": [
@@ -1120,42 +1065,18 @@
       },
       "version": "1.0.0",
       "items_in": 16,
-      "elapsed_ms": 0.063
+      "elapsed_ms": 0.062
      }
     ]
    },
-   "staged_candidates": 6,
+   "staged_candidates": 46,
    "insights": [
     {
-     "id": 899,
-     "type": "fact",
-     "severity": "low",
-     "confidence": 0.96,
-     "title": "窗口内 16 条事件全部为低危日志，无错误级事件",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 900,
+     "id": 1161,
      "type": "fact",
      "severity": "low",
      "confidence": 0.95,
-     "title": "唯一被标记异常的事件是 156225，文本为名称解析失败",
+     "title": "窗口内 16 条事件全部为 low，错误数为 0",
      "run_metadata": {
       "runbooks": [
        {
@@ -1175,35 +1096,11 @@
      }
     },
     {
-     "id": 901,
-     "type": "inference",
-     "severity": "medium",
-     "confidence": 0.72,
-     "title": "156225 更可能是名称/地址解析失败，而非真实进程崩溃",
-     "run_metadata": {
-      "runbooks": [
-       {
-        "id": "rb_crash_001",
-        "steps": [
-         "确认崩溃进程名、PID 与崩溃时间点",
-         "检查是否有 core dump 生成，路径与大小",
-         "查看崩溃前后同一进程的日志，确认是否有前置异常",
-         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
-         "核对近期是否有版本升级、依赖变更或配置改动",
-         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
-        ],
-        "title": "进程崩溃处置",
-        "references": []
-       }
-      ]
-     }
-    },
-    {
-     "id": 902,
+     "id": 1162,
      "type": "fact",
-     "severity": "low",
+     "severity": "high",
      "confidence": 0.9,
-     "title": "窗口内存在一次完整的睡眠/唤醒与无线网卡状态切换序列",
+     "title": "唯一被标记的高危异常是 event 189897",
      "run_metadata": {
       "runbooks": [
        {
@@ -1223,11 +1120,11 @@
      }
     },
     {
-     "id": 903,
-     "type": "possibility",
+     "id": 1163,
+     "type": "inference",
      "severity": "low",
-     "confidence": 0.55,
-     "title": "AWDL 接口频繁切换可能与 mDNS 接口注销告警相关",
+     "confidence": 0.7,
+     "title": "ProcessCrash 判定很可能来自关键词匹配而非真实崩溃证据",
      "run_metadata": {
       "runbooks": [
        {
@@ -1247,11 +1144,59 @@
      }
     },
     {
-     "id": 904,
+     "id": 1164,
+     "type": "inference",
+     "severity": "low",
+     "confidence": 0.75,
+     "title": "07-01 01:00–01:19 的日志呈现一次完整的睡眠/唤醒周期",
+     "run_metadata": {
+      "runbooks": [
+       {
+        "id": "rb_crash_001",
+        "steps": [
+         "确认崩溃进程名、PID 与崩溃时间点",
+         "检查是否有 core dump 生成，路径与大小",
+         "查看崩溃前后同一进程的日志，确认是否有前置异常",
+         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
+         "核对近期是否有版本升级、依赖变更或配置改动",
+         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+        ],
+        "title": "进程崩溃处置",
+        "references": []
+       }
+      ]
+     }
+    },
+    {
+     "id": 1165,
+     "type": "possibility",
+     "severity": "medium",
+     "confidence": 0.35,
+     "title": "189897 时间点上可能存在一次未被完整记录的进程异常",
+     "run_metadata": {
+      "runbooks": [
+       {
+        "id": "rb_crash_001",
+        "steps": [
+         "确认崩溃进程名、PID 与崩溃时间点",
+         "检查是否有 core dump 生成，路径与大小",
+         "查看崩溃前后同一进程的日志，确认是否有前置异常",
+         "确认崩溃是单次还是周期性（周期性与单次的处置完全不同）",
+         "核对近期是否有版本升级、依赖变更或配置改动",
+         "确认该进程是否被 supervisor / systemd 自动拉起，以及重启次数"
+        ],
+        "title": "进程崩溃处置",
+        "references": []
+       }
+      ]
+     }
+    },
+    {
+     "id": 1166,
      "type": "unknown",
      "severity": "low",
-     "confidence": 0.3,
-     "title": "元数据时间窗口与实际事件时间戳不一致，无法确认分析区间",
+     "confidence": 0.2,
+     "title": "metadata 时间窗口与 statistics 时间范围不一致的原因未知",
      "run_metadata": {
       "runbooks": [
        {
@@ -1271,20 +1216,21 @@
      }
     }
    ],
-   "narrative": "Run #3567（项目 7874，trace db5e52a5ba4741d088ae4d902e465ae5） 状态 completed。\n开始于 2026-09-24T13:01:52.778200+00:00，耗时 27.3s。\n共调用模型 1 次，输入 1617 / 输出 2898 tokens，花费 ¥0.0132。\n分级花费：L3 1 次 ¥0.0132。\n调用工具 2 次。\n发生过 1 次模型降级。\n产出 6 条结论：\n  - [fact] 窗口内 16 条事件全部为低危日志，无错误级事件（4 条证据）\n  - [fact] 唯一被标记异常的事件是 156225，文本为名称解析失败（1 条证据）\n  - [inference] 156225 更可能是名称/地址解析失败，而非真实进程崩溃（1 条证据）\n  - [fact] 窗口内存在一次完整的睡眠/唤醒与无线网卡状态切换序列（4 条证据）\n  - [possibility] AWDL 接口频繁切换可能与 mDNS 接口注销告警相关（2 条证据）\n  - [unknown] 元数据时间窗口与实际事件时间戳不一致，无法确认分析区间（2 条证据）",
+   "narrative": "Run #4617（项目 9907，trace 68ea39c343cf4e7cb33dcb407f00c9d4） 状态 completed。\n开始于 2026-09-24T15:11:47.226840+00:00，耗时 12.3s。\n共调用模型 1 次，输入 1652 / 输出 2602 tokens，花费 ¥0.0121。\n分级花费：L3 1 次 ¥0.0121。\n调用工具 2 次。\n发生过 1 次模型降级。\n产出 6 条结论：\n  - [fact] 窗口内 16 条事件全部为 low，错误数为 0（8 条证据）\n  - [fact] 唯一被标记的高危异常是 event 189897（1 条证据）\n  - [inference] ProcessCrash 判定很可能来自关键词匹配而非真实崩溃证据（5 条证据）\n  - [inference] 07-01 01:00–01:19 的日志呈现一次完整的睡眠/唤醒周期（6 条证据）\n  - [possibility] 189897 时间点上可能存在一次未被完整记录的进程异常（3 条证据）\n  - [unknown] metadata 时间窗口与 statistics 时间范围不一致的原因未知（2 条证据）",
    "api_insights": 6,
    "disk": {
-    "dir": "/app/data/uploads/7874",
+    "dir": "/app/data/uploads/9907",
     "files": [
-     "20260924130152751231_system.log"
+     "20260924151147168728_system.log"
     ],
     "canary_email_on_disk": false,
     "canary_secret_on_disk": false,
     "email_markers": 0,
     "secret_markers": 0,
-    "lines": 16
+    "lines": 16,
+    "source": "container"
    },
-   "staging_file_exists": false
+   "staging_file_exists": true
   }
  ],
  "trace_summary": {
@@ -3213,7 +3159,7 @@
   }
  },
  "uploads_only": {
-  "project_id": 6945,
+  "project_id": 9713,
   "jsonl": {
    "status_code": 200,
    "file": "logs/nginx_json_access.log",
@@ -3235,7 +3181,7 @@
     "by_rule": {}
    },
    "created_data_source": true,
-   "data_source_id": 4931
+   "data_source_id": 6980
   },
   "negative_sample": {
    "status_code": 200,
@@ -3277,7 +3223,7 @@
     "by_rule": {}
    },
    "created_data_source": true,
-   "data_source_id": 4932
+   "data_source_id": 6981
   },
   "metric_events": {
    "status_code": 200,
@@ -3298,7 +3244,7 @@
     "by_rule": {}
    },
    "created_data_source": false,
-   "data_source_id": 4932
+   "data_source_id": 6981
   },
   "malformed": {
    "status_code": 200,
@@ -3323,11 +3269,11 @@
     "by_rule": {}
    },
    "created_data_source": false,
-   "data_source_id": 4932
+   "data_source_id": 6981
   },
   "reuse_second_upload": {
    "created_data_source": false,
-   "data_source_id": 4932
+   "data_source_id": 6981
   },
   "oversize": {
    "status_code": 413,
@@ -3340,19 +3286,8 @@
    "data_sources": 2
   },
   "stored_files": {
-   "dir": "data/uploads/6945",
-   "files": [
-    "20260924114538992589_nginx_json_access.log",
-    "20260924114541103247_nginx_plain.log",
-    "20260924114543199605_metrics.log",
-    "20260924114543274446_mixed.log",
-    "20260924114543418548_Mac_2k.log"
-   ],
-   "canary_email_on_disk": false,
-   "canary_secret_on_disk": false,
-   "email_markers": 0,
-   "secret_markers": 0,
-   "lines": 1000
+   "dir": "data/uploads/9713",
+   "files": []
   }
  },
  "api_contract": {
@@ -3395,19 +3330,19 @@
     "status": 200,
     "html": true
    },
-   "/knowledge/7137": {
+   "/knowledge/9711": {
     "status": 200,
     "html": true
    }
   },
   "cancel_http": 200,
-  "cancelled_status": "queued",
-  "status_after_poll": "completed",
-  "cancel_effective": false,
+  "cancelled_status": "cancelled",
+  "status_after_poll": "cancelled",
+  "cancel_effective": true,
   "retry": {
    "status_code": 422,
    "body": {
-    "detail": "Run 3115 当前状态 completed 不允许重新分析；只有 ['failed', 'partial_success', 'timeout'] 可以"
+    "detail": "Run 4520 当前状态 cancelled 不允许重新分析；只有 ['failed', 'partial_success', 'timeout'] 可以"
    }
   },
   "report_page": {
@@ -3415,8 +3350,8 @@
    "html": true
   },
   "idempotent": {
-   "first_run_id": 3116,
-   "second_run_id": 3116,
+   "first_run_id": 4521,
+   "second_run_id": 4521,
    "same_run_id": true,
    "reused": true,
    "second_status": 202
@@ -3465,7 +3400,7 @@
   "month_spent_full": {
    "http": 402,
    "detail": "本月已花 ¥9.9990，月度预算 ¥10.0000 剩余 ¥0.0010 不足以覆盖预计成本 ¥0.0088",
-   "seeded_run_id": 3111,
+   "seeded_run_id": 4517,
    "seeded_cost": 9.999,
    "month_start": "2026-08-31 16:00:00+00:00"
   },
@@ -3473,13 +3408,13 @@
    "http": 202,
    "status_field": "queued",
    "detail": "None",
-   "seeded_run_id": 3112,
+   "seeded_run_id": 4518,
    "seeded_cost": 30.0
   },
   "started_at_coverage": {
-   "runs_total": 285,
-   "runs_with_started_at": 88,
-   "runs_with_cost": 132
+   "runs_total": 446,
+   "runs_with_started_at": 218,
+   "runs_with_cost": 189
   },
   "peak_valley": {
    "now_is_peak": false,
@@ -3505,7 +3440,7 @@
   }
  },
  "pytest": {
-  "tests": 753,
+  "tests": 756,
   "failures": 0,
   "errors": 0,
   "skipped": 3
@@ -3714,22 +3649,24 @@
   "l1_reached": true
  },
  "fresh_clone_check": {
+  "clone_remote": "https://github.com/skxby/evidencelog",
   "clone_exit": 0,
-  "clone_files": 1209,
+  "clone_files": 316,
   "clone_has_env": false,
+  "clone_head": "99fb0934bc94",
   "env_copied": true,
   "original_down_exit": 0,
   "up_exit": 0,
   "up_tail": [
+   " Container logagent-worker Started ",
    " Container logagent-web Started ",
-   " Container logagent-beat Started ",
-   " Container logagent-worker Started"
+   " Container logagent-beat Started"
   ],
   "healthy_after_up": true,
   "e2e_exit": 0,
   "e2e_passed": 16,
   "e2e_total": 16,
-  "e2e_cost": 0.015036,
+  "e2e_cost": 0.013728,
   "e2e_tail": [
    "  PASS  他人读 Run → 404  — HTTP 404",
    "⑨ 页面与文档",

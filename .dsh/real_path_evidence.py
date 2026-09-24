@@ -173,14 +173,22 @@ def disk_facts(project_id: int) -> dict:
     """
     folder = data_dir() / "uploads" / str(project_id)
     files = sorted(p for p in folder.glob("*")) if folder.exists() else []
-    out: dict = {"dir": str(folder.relative_to(ROOT)).replace("\\", "/"), "files": [p.name for p in files]}
+    out: dict = {
+        "dir": str(folder.relative_to(ROOT)).replace("\\", "/"),
+        "files": [p.name for p in files],
+        "source": "host",
+    }
     if files:
         text = files[0].read_text(encoding="utf-8", errors="replace")
         out.update(_masking_facts(text))
         return out
 
     container = _disk_facts_in_container(project_id)
-    return container or out
+    if container is not None:
+        return container
+    # 两条路都没读到：**如实说明**，不要让它看起来像"脱敏没做"
+    out["note"] = "宿主机与容器内都没读到落盘文件（容器没起或 docker exec 失败）"
+    return out
 
 
 def _masking_facts(text: str) -> dict:
@@ -194,7 +202,14 @@ def _masking_facts(text: str) -> dict:
 
 
 def _disk_facts_in_container(project_id: int) -> dict | None:
-    """宿主机看不到卷时，进容器读一次（同一份卷，web/worker 都挂着它）。"""
+    """宿主机看不到卷时，进容器读一次（同一份卷，web/worker 都挂着它）。
+
+    这里刻意把子进程的 stdout **重定向到文件**，而不是用 `capture_output=True`：
+    受限沙箱里"父进程用管道捕获子进程输出"会被直接挡掉（EPERM），
+    而异常一旦被下面那句 `except` 吞掉，落盘脱敏这条证据就会**静默退化成
+    "宿主机没读到文件"** —— 于是真机明明没问题，验收表却判"未达标"。
+    （2026-09-24 实测踩到：对着容器栈跑时 04-2 变成了 ❌，而 E2E 里落盘是干净的。）
+    """
     import subprocess
 
     script = (
@@ -208,23 +223,26 @@ def _disk_facts_in_container(project_id: int) -> dict | None:
         "'email_markers':t.count('[EMAIL_'),'secret_markers':t.count('[SECRET_'),"
         "'lines':t.count(chr(10))}))"
     )
+    out_file = TMP / f"disk_facts_{project_id}.json"
+    out_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        proc = subprocess.run(
-            ["docker", "compose", "exec", "-T", "web", "python", "-c", script],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
+        with out_file.open("w", encoding="utf-8") as handle:
+            proc = subprocess.run(
+                ["docker", "compose", "exec", "-T", "web", "python", "-c", script],
+                cwd=ROOT,
+                stdout=handle,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
     except Exception:  # noqa: BLE001 - 没有 docker 就用宿主结果
         return None
-    for line in reversed((proc.stdout or "").splitlines()):
+    if proc.returncode != 0 or not out_file.exists():
+        return None
+    for line in reversed(out_file.read_text(encoding="utf-8", errors="replace").splitlines()):
         line = line.strip()
         if line.startswith("{"):
             try:
-                return json.loads(line)
+                return {**json.loads(line), "source": "container"}
             except json.JSONDecodeError:
                 continue
     return None

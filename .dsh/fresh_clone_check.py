@@ -10,7 +10,13 @@
   ⑤ 在 clone 目录里跑 `node .dsh/final_verify.cjs` —— 16 项端到端，含一次真实分析
   ⑥ clone 目录 `docker compose down`，再把原栈起回来，确认数据与健康都还在
 
-用法：python .dsh/fresh_clone_check.py [--keep]   # --keep：跑完不删 clone 目录
+用法：python .dsh/fresh_clone_check.py [--keep] [--remote <url>]
+      # --keep：跑完不删 clone 目录
+      # --remote：改成从远端 clone（默认从本地工作区 clone）。仓库公开后，
+      #           `--remote https://github.com/skxby/evidencelog` 验的才是
+      #           "别人 clone 到的东西能不能跑"，而不是"我本机这份能不能跑"。
+      #           网络受限时可用 GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n
+      #           给 git 传代理与 TLS 后端配置（脚本原样继承环境变量）。
 """
 
 from __future__ import annotations
@@ -69,13 +75,26 @@ def main(argv: list[str]) -> int:
     if CLONE.exists():
         shutil.rmtree(CLONE, ignore_errors=True)
 
+    # 从哪 clone：默认本地工作区；给了 --remote 就从远端（公开仓库）拉
+    remote = str(ROOT)
+    if "--remote" in argv:
+        remote = argv[argv.index("--remote") + 1]
+
     # ① clone
-    code, log = run(["git", "clone", "--quiet", str(ROOT), str(CLONE)], cwd=ROOT)
+    code, log = run(["git", "clone", "--quiet", remote, str(CLONE)], cwd=ROOT)
+    facts["clone_remote"] = remote
     facts["clone_exit"] = code
     facts["clone_files"] = len(list(CLONE.rglob("*"))) if CLONE.exists() else 0
     facts["clone_has_env"] = (CLONE / ".env").exists()  # 应当为 False（密钥不进版本库）
-    print(f"① clone 退出码 {code}，文件 {facts['clone_files']} 个，"
-          f"clone 里有 .env 吗：{facts['clone_has_env']}")
+    facts["clone_head"] = run(["git", "rev-parse", "HEAD"], cwd=CLONE)[1].strip()[:12] \
+        if CLONE.exists() else ""
+    print(f"① clone（{remote}）退出码 {code}，HEAD {facts['clone_head']}，"
+          f"文件 {facts['clone_files']} 个，clone 里有 .env 吗：{facts['clone_has_env']}")
+    if code != 0:
+        facts["note"] = f"clone 失败：{log.strip().splitlines()[-3:]}"
+        print(json.dumps(facts, ensure_ascii=False, indent=1))
+        merge({"fresh_clone_check": facts})
+        return 1
 
     # ② 准备配置（README 第 ① 步）
     shutil.copy2(ROOT / ".env", CLONE / ".env")
