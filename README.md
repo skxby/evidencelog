@@ -183,6 +183,31 @@ pytest tests/golden -q
 RUN_LIVE_MODEL_TESTS=1 pytest tests/integration/test_gateway_live.py -v -s
 ```
 
+### 评测与验收脚本（`.dsh/`）
+
+四个脚本都是**确定性、可复现**的；前两个不调模型，因此零成本。
+
+| 脚本 | 作用 | 命令 |
+|---|---|---|
+| `.dsh/parser_eval.py` | 用 `logs/` 下 8 份真实日志量化可解析率与脱敏误伤率 | `python .dsh/parser_eval.py` |
+| `.dsh/golden_eval.py` | 跑 Golden Set 五个场景并打印逐条断言与成本 | `python .dsh/golden_eval.py`（加 `RUN_GOLDEN_LIVE=1` 走真模型，**付费**） |
+| `.dsh/stage_verify.py` | 按「阶段 → 承载验收的测试文件」出可核对的计数表 | `python .dsh/stage_verify.py` |
+| `.dsh/final_verify.cjs` | 对着**真跑起来的全栈**做 16 项端到端检查（真实 HTTP） | `node .dsh/final_verify.cjs` |
+
+最近一次实测（2026-09-24）：
+
+```text
+解析率   域内 5 份系统日志 10000/10000 = 100%；含负样本 nginx_plain 11500/12500 = 92.00%
+脱敏     替换 12268 次；11575 个排障字段（uid=/pid=/HTTP 状态码/请求路径/容器 ID）零误伤
+Golden   离线 18/18 断言 ¥0；真模型 18/18 断言 ¥0.025524，0 条无证据的 fact
+E2E      16/16；真实调用 1607/3100 tokens、¥0.0140、8 条结论
+全量     pytest 693 passed / 3 skipped（跳过的是需 RUN_LIVE_MODEL_TESTS=1 的付费用例）
+```
+
+> `logs/` 是外部公开真实日志语料（出处见 `logs/README.md`），已在版本库内，
+> 故**全新 clone 也跑得了这些基线**（`.gitattributes` 对 `logs/*.log` 关掉了
+> 换行符规范化：语料字节不能被悄悄改写，否则基线不可比）。
+
 ---
 
 ## 7. 排障

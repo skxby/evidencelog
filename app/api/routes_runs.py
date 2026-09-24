@@ -18,6 +18,7 @@ from app.analysis.idempotency import make_idempotency_key
 from app.analysis.runner import RunRequest, create_run
 from app.api.deps import ProjectScopeDep, SessionDep
 from app.api.schemas import (
+    HTTP_422,
     CreateRunRequest,
     CreateRunResponse,
     EvidenceResponse,
@@ -69,7 +70,7 @@ async def upload_log(
     """
     if fmt not in ("txt", "jsonl"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=HTTP_422,
             detail=f"不支持的格式 {fmt!r}；V1 只支持 txt 与 jsonl",
         )
 
@@ -91,7 +92,7 @@ async def upload_log(
         ) from exc
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            status_code=HTTP_422, detail=str(exc)
         ) from exc
 
     # 上传也显式提交：响应"已入库 N 条"之后，紧接着的分析必须能读到它们。

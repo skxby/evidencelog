@@ -25,6 +25,7 @@ from app.analysis.knowledge_staging import (
 )
 from app.api.deps import ProjectScopeDep
 from app.api.schemas import (
+    HTTP_422,
     EditCandidateRequest,
     KnowledgeActionResponse,
     KnowledgeCandidateResponse,
@@ -90,12 +91,12 @@ def _assert_confirmable(item: dict[str, Any]) -> None:
     run_id = evidence.get("run_id")
     if not event_ids and not run_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=HTTP_422,
             detail="该候选没有 evidence（run_id / event_ids），不允许确认为 confirmed",
         )
     if float(item.get("confidence") or 0.0) <= 0.0:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=HTTP_422,
             detail="该候选 confidence 为 0，不允许确认为 confirmed",
         )
 
@@ -234,7 +235,7 @@ def edit_candidate(
     updates = payload.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="没有可更新的字段"
+            status_code=HTTP_422, detail="没有可更新的字段"
         )
     item.update(updates)
     item["updated_at"] = datetime.now(timezone.utc).isoformat()

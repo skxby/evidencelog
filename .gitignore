@@ -30,6 +30,13 @@ pytest-cache-files-*/
 # alembic 执行后留下的字节码目录
 migrations/__pycache__/
 
+# --- 评测 / 验收脚本的**产出**（脚本本身在 .dsh/ 里，要进版本库）---
+# 这些是每次跑都会变的中间产物：junit 报告、评测日志、Golden 上传的脱敏副本
+.dsh/junit*/
+.dsh/*.xml
+.dsh/*.txt
+.dsh/golden-uploads/
+
 # --- 运行时数据 ---
 # uploads/ 存的是脱敏后的日志，属运行数据，不进版本库
 uploads/*

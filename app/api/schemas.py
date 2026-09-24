@@ -15,8 +15,22 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from starlette import status
 
 from app.gateways.base import MODEL_TIERS
+
+#: 422 的状态常量。
+#
+# Starlette 1.7 起把 `HTTP_422_UNPROCESSABLE_ENTITY` 改名成
+# `HTTP_422_UNPROCESSABLE_CONTENT`，旧名开始报弃用告警 —— 而告警长期存在会
+# 训练人忽略告警输出，真正的新告警也就看不见了。
+#
+# 用 `getattr(..., None)` 而不是给它一个默认值：默认值会被**立即求值**，
+# 在装着新版 Starlette 的环境里照样去碰那个已弃用的属性，告警一条不少。
+# 取不到再退回旧名，这样新旧两个版本都对，且新版下不再有告警。
+HTTP_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", None) or (
+    status.HTTP_422_UNPROCESSABLE_ENTITY
+)
 
 
 def _require_tz(value: datetime | None, *, field: str) -> datetime | None:
