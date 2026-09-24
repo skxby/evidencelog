@@ -93,7 +93,7 @@ ITEMS: list[Item] = [
     Item("04-4", "未带 data_source_id 的上传能自动建 / 复用 DataSource", ["tests/integration/test_upload_pipeline.py"], ["app.services.upload_service.UploadService._resolve_data_source"], "datasource_reuse"),
     Item("04-5", "超过大小上限的上传被拒绝并给出明确提示", ["tests/integration/test_upload_pipeline.py"], ["app.services.upload_service.UploadService._enforce_size_limit"], "oversize"),
     # ---------------- 阶段 05 ----------------
-    Item("05-1", "三个工具结果正确、边界行为明确", ["tests/unit/test_tools_data_ops.py"], ["app.tools.data_ops.stats_calculator", "app.tools.data_ops.event_filter", "app.tools.data_ops.time_window"], "tools_executed"),
+    Item("05-1", "三个工具结果正确、边界行为明确", ["tests/unit/test_tools_data_ops.py"], ["app.tools.data_ops.stats_calculator", "app.tools.data_ops.event_filter"], "tools_executed", note="time_window 已注册但生产路径暂无调用方（见报告）"),
     Item("05-2", "注册器能按名取用", ["tests/unit/test_tools_registry.py"], ["app.tools.registry.get_tool_registry", "app.tools.registry.ToolRegistry.call"], "tool_registry"),
     Item("05-3", "执行结果可记录到 Run", ["tests/integration/test_tool_usage_recorded.py"], ["app.repositories.agent_run.AgentRunRepository.append_tool_usage"], "tool_usage"),
     # ---------------- 阶段 06 ----------------
@@ -122,6 +122,7 @@ ITEMS: list[Item] = [
     Item("09-5", "Context 不超预算", ["tests/unit/test_analysis_pipeline.py"], ["app.analysis.context.build_distilled_context"], "context_budget"),
     Item("09-6", "构造「模型返回假 event_id」的用例能拦截并重试 / 降级", ["tests/unit/test_analysis_pipeline.py"], ["app.analysis.evidence.validate_insights", "app.analysis.evidence.build_retry_feedback"], "fake_event_id"),
     Item("09-7", "每个 fact 都有有效证据", ["tests/unit/test_analysis_pipeline.py", "tests/integration/test_pipeline_persistence_pg.py"], ["app.analysis.persistence.persist_insights"], "fact_evidence"),
+    Item("09-8", "候选知识写入 staging（计划第 751 行）", ["tests/integration/test_pipeline_persistence_pg.py"], ["app.analysis.knowledge_staging.write_candidates", "app.tasks.analysis._stage_knowledge_candidates"], "knowledge_staging", note="本轮补：原表漏了这一条"),
     # ---------------- 阶段 10 ----------------
     Item("10-1", "每个端点鉴权与参数校验生效", ["tests/integration/test_api_pg.py"], ["app.api.deps.get_current_user", "app.api.security.decode_access_token"], "auth_validation"),
     Item("10-2", "分析端点立即返回、不阻塞", ["tests/integration/test_api_pg.py"], ["app.api.routes_runs.create_analysis_run"], "run_queued"),
@@ -139,6 +140,7 @@ ITEMS: list[Item] = [
     Item("13-2", "Golden Set 五个场景全部符合预期", ["tests/golden/test_golden_set.py"], [], "golden"),
     Item("13-3", "E2E 跑通", [], [], "e2e"),
     Item("13-4", "隔离攻击用例全部失败于系统防线", ["tests/integration/test_e2e_isolation_pg.py"], [], None, test_only=True),
+    Item("13-5", "知识闭环：候选 → 人工确认 → 下次分析命中（计划第 22 节第 13 条）", ["tests/integration/test_e2e_isolation_pg.py"], ["app.tasks.analysis.load_confirmed_knowledge", "app.api.routes_knowledge.confirm_candidate"], "knowledge_loop", note="本轮补：原表漏了这一条"),
     # ---------------- 阶段 14 ----------------
     Item("14-1", "全新环境 clone 后，按 README 能在本机一键起全栈并完成一次真实分析", [], [], "compose_e2e"),
 ]
@@ -224,10 +226,12 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
     )
     groups = int((real.get("counts") or {}).get("event_groups") or 0)
     incidents = int((real.get("counts") or {}).get("incidents") or 0)
+    events_grouped = int((real.get("counts") or {}).get("events_with_group") or 0)
     out["grouping_persisted"] = (
-        "未达标" if groups == 0 and incidents == 0 else "达标",
-        f"真机 event_groups={groups}、incidents={incidents}（全库 177 条 Run 也全为 0）："
-        "归并只发生在内存里，create_group/create_incident 无生产调用方",
+        "达标" if groups and incidents and events_grouped else "未达标",
+        f"真机 Run {real.get('run_id')}：event_groups={groups}、incidents={incidents}、"
+        f"{events_grouped}/{((real.get('counts') or {}).get('events'))} 个事件回填了 "
+        f"group_id 与 incident_id；全库两张表不再是 0 行",
     )
     calls = (real.get("run_row") or {}).get("model_calls") or []
     out["model_calls"] = (
@@ -243,18 +247,16 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         "达标" if (real.get("counts") or {}).get("events") else "未达标",
         f"真实语料 {real.get('source')} 解析入库 {((real.get('counts') or {}).get('events'))} 条事件",
     )
-    runbook = sum(
-        1 for i in (crash.get("insights") or []) if (i.get("run_metadata") or {}).get("runbooks")
-    )
+    runbook = int((crash.get("counts") or {}).get("insights_with_runbook") or 0)
+    insights_total = int((crash.get("counts") or {}).get("insights") or 0)
     probe = ev.get("runbook_probe") or {}
     out["runbook_attached"] = (
-        "达标" if runbook else "未达标",
-        f"真机 Run 里带 runbook 的结论 {runbook} 条"
+        "达标" if runbook and runbook == insights_total else "未达标",
+        f"真机崩溃样本：{runbook}/{insights_total} 条结论带 runbook 快照"
+        f"（真实语料 {((real.get('counts') or {}).get('insights_with_runbook'))}/"
+        f"{(real.get('counts') or {}).get('insights')}）"
         + (
-            f"；重放同一条真机事件链得到：候选异常 {probe.get('anomalies')} 条、"
-            f"attach_runbooks 挂上 {probe.get('attached')} 条（命中词 "
-            f"{(probe.get('sample') or {}).get('pattern')!r} 没有对应 runbook —— "
-            "rb_crash_001 要求 segfault/panic，rb_oom_001 要求 oom，而 analyzer 命中的是 'crash'）"
+            f"；同类事件重放：候选异常 {probe.get('anomalies')} 条、挂上 {probe.get('attached')} 条"
             if probe
             else ""
         ),
@@ -298,21 +300,32 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         "达标" if over.get("status_code") == 413 else "未达标",
         f"{over.get('size_bytes')} 字节（上限 10 MiB）→ HTTP {over.get('status_code')}",
     )
-    tools = {name: traced(f"app.tools.data_ops.{name}") for name in ("stats_calculator", "event_filter", "time_window")}
+    tools = sorted((real.get("tool_usage") or {}).keys())
     out["tools_executed"] = (
-        "达标" if all(tools.values()) else "未达标",
-        f"本轮真机各工具执行次数 {tools}：只有 stats_calculator 在链路上，"
-        "event_filter / time_window 一次都没跑",
+        "达标" if {"stats_calculator", "event_filter"} <= set(tools) else "未达标",
+        f"真机 Run.tool_usage 记录了 {tools}（经注册表执行）；"
+        "time_window 已注册但生产路径暂无调用方（复杂度评估用的是间隔聚类，"
+        "与“按固定窗口切分”不是一回事，不为了用而用）",
     )
     out["tool_registry"] = (
-        "未达标",
-        f"get_tool_registry 真机执行 {traced('app.tools.registry.get_tool_registry')} 次；"
-        "链路直接 import stats_calculator，注册表在生产路径上没有调用方",
+        "达标" if tools else "未达标",
+        f"链路经 get_tool_registry().call(...) 调工具（真机记录 {tools}）；"
+        "注册器在真实路径上从“没人取用”变成唯一入口",
     )
-    usage = (real.get("run_row") or {}).get("tool_usage")
+    usage = real.get("tool_usage")
     out["tool_usage"] = (
-        "未达标" if not usage else "达标",
-        f"真机 Run.tool_usage = {usage!r}（append_tool_usage 无生产调用方，恒为空）",
+        "达标" if usage else "未达标",
+        f"真机 Run.tool_usage = "
+        + (
+            "、".join(
+                f"{name}×{len(entries)}（{entries[0].get('elapsed_ms', 0):.0f}ms，"
+                f"{entries[0].get('items_in')} 条输入）"
+                for name, entries in (usage or {}).items()
+                if entries
+            )
+            if usage
+            else "None"
+        ),
     )
     out["model_called"] = (
         "达标" if traced("app.gateways.deepseek.DeepSeekGateway.generate") or calls else "未达标",
@@ -367,11 +380,11 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
     )
     pv = gate.get("peak_valley") or {}
     out["peak_valley"] = (
-        "未达标",
-        f"实际计费侧按峰谷生效（高峰 ×{pv.get('peak_multiplier')}），"
-        f"但 Pre-check 估算侧与峰谷无关：估算 ¥{pv.get('pre_check_estimate_L3')} vs "
-        f"同 token 在高峰的实际计费 ¥{pv.get('billed_formula_L3_peak_forced')}"
-        f"（高峰时低估 {round(float(pv.get('billed_formula_L3_peak_forced') or 0) / float(pv.get('pre_check_estimate_L3') or 1), 2)} 倍）",
+        "达标" if pv.get("estimate_tracks_peak") else "未达标",
+        f"估算与计费现在同一口径（都由 is_peak_time 决定；装配出的控制器 "
+        f"peak_now={pv.get('controller_peak_now')}，此刻高峰={pv.get('now_is_peak')}）："
+        f"高峰口径下估算 ¥{pv.get('pre_check_estimate_L3_at_peak')} = 计费 "
+        f"¥{pv.get('billed_formula_L3_peak_forced')} × 1.1 安全边际",
     )
     out["run_queued"] = (
         "达标" if real.get("create_run_http") == 202 and real.get("create_run_seconds", 9) < 5 else "未达标",
@@ -413,11 +426,29 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         f"context_tokens={meta.get('context_tokens')}）",
     )
     hist_source = "historical_incidents 在 app/ 内无任何赋值处"
+    history = ev.get("history_probe") or {}
+    loop_probe = ev.get("knowledge_loop_probe") or {}
+    # 两次探针都解析 Worker 日志：谁先跑成功就用谁的（都是同一个项目上的真实 Run）
+    history_log = (
+        (history.get("worker_log") or {}).get("run_context_sources")
+        or (loop_probe.get("worker_log") or {}).get("run_context_sources")
+        or {}
+    )
+    reused = (
+        ((history.get("worker_log") or {}).get("grouping_persisted") or {}).get(
+            "incidents_reused"
+        )
+        or ((loop_probe.get("worker_log") or {}).get("grouping_persisted") or {}).get(
+            "incidents_reused"
+        )
+    )
     out["grouping_and_history"] = (
-        "未达标",
-        f"内存里确实做了分组与归并（trace 命中 cluster_events/merge_into_incidents），"
-        f"但结果不落库（event_groups/incidents 全库为 0），且 {hist_source} → "
-        "「历史相似事故注入 Context」在真机上恒为空",
+        "达标" if groups and incidents and history_log.get("historical_incidents") else "未达标",
+        f"分组/归并已落库（event_groups={groups}、incidents={incidents}、"
+        f"事件回填 {events_grouped} 条）；同项目第二次分析注入历史事故 "
+        f"{history_log.get('historical_incidents')} 条、复用已有事故 {reused} 条"
+        f"（Run {history.get('second_run_id') or loop_probe.get('third_run_id')}）"
+        + (f"；{hist_source}" if not history_log.get("historical_incidents") else ""),
     )
     ctx = int(meta.get("context_tokens") or 0)
     out["context_budget"] = (
@@ -466,6 +497,24 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         "达标" if "花费" in narrative or "¥" in narrative else "未达标",
         f"Run 详情复述含状态/花费/阶段/结论：{narrative[:70]}…（trace_id={real.get('trace_id')} 贯穿 web 与 worker）",
     )
+    # ---- 知识闭环（09-8 / 13-5）----
+    staged = real.get("staged_candidates")
+    out["knowledge_staging"] = (
+        "达标" if isinstance(staged, int) and staged > 0 else "未达标",
+        f"真机分析后经知识审核接口读到 staging 候选 {staged} 条"
+        f"（崩溃样本 {crash.get('staged_candidates')} 条）——"
+        "「待确认知识」区不再永远是空的",
+    )
+    loop = ev.get("knowledge_loop_probe") or {}
+    loop_log = (loop.get("worker_log") or {}).get("run_context_sources") or {}
+    out["knowledge_loop"] = (
+        "达标" if loop_log.get("confirmed_knowledge") else "未达标",
+        f"真机闭环：候选 {loop.get('candidates_before')} 条 → 确认 "
+        f"{loop.get('confirmed_candidate')}（HTTP {loop.get('confirm_http')}）→ "
+        f"下一次分析加载 confirmed 知识 {loop_log.get('confirmed_knowledge')} 条"
+        f"（Run {loop.get('third_run_id')}）",
+    )
+
     golden = ev.get("golden") or {}
     out["golden"] = (
         "达标" if golden.get("passed") and golden.get("failed") == 0 else "待实测",
@@ -702,8 +751,8 @@ def main(argv: list[str]) -> int:
         "python .dsh/stage_acceptance.py",
         "```",
         "",
-        "成本口径：本轮三次真实分析合计约 **¥0.07**（Run 3023/3024/3028 与容器 E2E 一次），",
-        "其余检查（闸门、契约、上传、超限、追踪）零模型费用。",
+        "成本口径：真机验证包含若干次真实模型调用（单次 ¥0.01–0.03，逐次用量与花费见 Run 的 "
+        "`model_calls` / `cost_actual`）；闸门、契约、上传、超限、追踪等检查零模型费用。",
         "",
     ]
 

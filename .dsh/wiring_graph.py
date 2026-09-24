@@ -62,6 +62,11 @@ FRAMEWORK_REGISTRARS = {
 #: `getattr(self, f"model_{tier}_price...")` 这种动态属性访问解析不出来。
 #: 只有经过 `settings_usage_audit.py` 独立证明确实被读到的字段才允许登记在这里 ——
 #: 否则这个名单就成了"把假警藏起来"的地方。
+#: 注册式装配里的回调参数名：`make_spec(func=...)`、`register(handler=...)`。
+#: 被注册的函数不是"被调用"，但从此成为可达能力 —— 不认它，
+#: **按名调用**（`registry.call("stats_calculator")`）的符号会被误报成未接线。
+CALLBACK_KEYWORD_NAMES = {"func", "handler", "hook", "factory", "callable", "fn"}
+
 DYNAMIC_ACCESSOR_ALLOWLIST: dict[str, str] = {
     "app.config.Settings.tier_model": "经 settings_usage_audit 确认由 f-string getattr 读取",
     "app.config.Settings.tier_price": "经 settings_usage_audit 确认由 f-string getattr 读取",
@@ -385,6 +390,16 @@ class WiringGraph:
                             (c, q) for c, q in self._resolve_name(name, module)
                         )
             out.extend((c, quality) for c in cands)
+            # 注册式装配：`make_spec(func=stats_calculator)`、`register(handler=...)`。
+            # 被注册的函数**不是被调用**，但从这一刻起它就是可达能力的一部分 ——
+            # 不认这一条，工具会因为"经注册表按名调用"而被误报成未接线
+            # （按名调用本身解析不出来，只能靠注册点这一条线索）。
+            for keyword in call.keywords:
+                if keyword.arg in CALLBACK_KEYWORD_NAMES:
+                    for name in [
+                        n.id for n in ast.walk(keyword.value) if isinstance(n, ast.Name)
+                    ]:
+                        out.extend(self._resolve_name(name, module))
         # 签名注解 / 默认值 / 基类里的名字引用：Pydantic 模型、异常类、
         # Protocol 基类都是"被引用即接线"，不是被调用。
         for name in self._name_refs(node):

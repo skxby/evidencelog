@@ -21,10 +21,12 @@ from app.analysis.knowledge_staging import (
 from app.analysis.persistence import (
     EvidencePersistenceError,
     assert_no_evidence_violation,
+    persist_grouping,
     persist_insights,
 )
 from app.db import SessionLocal
 from app.models import AgentRun, DataSource, Project, User
+from app.models.event import Event
 from app.repositories import (
     AgentRunRepository,
     DataSourceRepository,
@@ -33,6 +35,9 @@ from app.repositories import (
     ProjectRepository,
     UserRepository,
 )
+from app.repositories.event import EventRepository
+from app.repositories.event_group import EventGroupRepository
+from app.repositories.incident import IncidentRepository
 
 pytestmark = pytest.mark.integration
 UTC = timezone.utc
@@ -379,3 +384,251 @@ def test_load_candidates_rejects_non_list_file(work_tmp):
     path.write_text("just: a mapping\n", encoding="utf-8")
     with pytest.raises(KnowledgeStagingError, match="必须是列表"):
         load_candidates(path)
+
+
+# ============================================================
+# 回归（2026-09-24 真机核验）：分组与事故必须落库
+#
+# 此前它们**只发生在内存里**：177 条 Run 跑完，event_groups 与 incidents
+# 两张表始终是 0 行 —— "事故记忆库"永远是空的，"历史相似事故注入"也无从谈起。
+# ============================================================
+
+
+def _seed_events(session, project, source, count: int = 4) -> list[int]:
+    ids: list[int] = []
+    for i in range(count):
+        row = Event(
+            project_id=project.id,
+            source_id=source.id,
+            timestamp=T0,
+            event_type="log",
+            severity="high" if i % 2 == 0 else "low",
+            message=f"event-{i}",
+        )
+        session.add(row)
+        session.flush()
+        ids.append(int(row.id))
+    return ids
+
+
+def _grouping(session, project, run, source, event_ids: list[int], *, reused_incident_id=None):
+    incident = {
+        "signature": "ProcessCrash",
+        "severity": "high",
+        "group_ids": [0, 1],
+        "time_start": T0,
+        "time_end": T0,
+    }
+    if reused_incident_id is not None:
+        incident["reused_incident_id"] = reused_incident_id
+    return persist_grouping(
+        project_id=project.id,
+        run_id=run.id,
+        groups=[
+            {
+                "group_key": "k1",
+                "source_id": source.id,
+                "template": "t1",
+                "event_ids": event_ids[:2],
+                "event_count": 2,
+                "time_start": T0,
+                "time_end": T0,
+            },
+            {
+                "group_key": "k2",
+                "source_id": source.id,
+                "template": "t2",
+                "event_ids": event_ids[2:],
+                "event_count": 2,
+                "time_start": T0,
+                "time_end": T0,
+            },
+        ],
+        incidents=[
+            incident
+        ],
+        group_repository=EventGroupRepository(session),
+        incident_repository=IncidentRepository(session),
+        event_repository=EventRepository(session),
+    )
+
+
+def test_grouping_and_incident_are_persisted_and_events_backfilled(session, ctx):
+    """计划第 365 行验收：事件可归入 EventGroup、再归并为 Incident 并查回。"""
+    project, source, run = ctx
+    event_ids = _seed_events(session, project, source, 4)
+
+    result = _grouping(session, project, run, source, event_ids)
+    session.flush()
+    session.expire_all()
+
+    assert len(result.group_ids) == 2 and len(result.incident_ids) == 1
+    assert result.groups_created == 2 and result.incidents_created == 1
+    assert result.events_grouped == 4
+    assert result.events_linked_to_incident == 4
+
+    # 事件上要能查回分组与事故（真源是 Event.group_id / incident_id）
+    stored = EventRepository(session).list_all(project.id)
+    assert {e.group_id for e in stored} == set(result.group_ids)
+    assert {e.incident_id for e in stored} == {result.incident_ids[0]}
+
+    # Incidents.group_ids 是真源，成员事件由它派生（不双写）
+    incidents = IncidentRepository(session)
+    assert sorted(incidents.group_ids_of(project.id, result.incident_ids[0])) == sorted(
+        result.group_ids
+    )
+    assert sorted(incidents.event_ids_of(project.id, result.incident_ids[0])) == sorted(
+        event_ids
+    )
+    # 结论回填用的映射
+    assert result.incident_by_event[str(event_ids[0])] == result.incident_ids[0]
+
+
+def test_repeated_group_key_reuses_the_existing_row(session, ctx):
+    """`(project, source, group_key)` 是唯一键：同一模板簇必须复用而不是再插一行。
+
+    第二次还带上 `reused_incident_id`（`merge_into_incidents` 匹配到历史事故时就是这么给的）：
+    事故要被**并入**而不是新开一条，`group_ids` 去重合并。
+    """
+    project, source, run = ctx
+    event_ids = _seed_events(session, project, source, 2)
+
+    first = _grouping(session, project, run, source, event_ids + event_ids)
+    session.flush()
+    second = _grouping(
+        session,
+        project,
+        run,
+        source,
+        event_ids + event_ids,
+        reused_incident_id=first.incident_ids[0],
+    )
+    session.flush()
+    session.expire_all()
+
+    assert first.groups_created == 2
+    assert second.groups_created == 0, "同一 group_key 又插了一行，会撞唯一约束"
+    assert second.group_ids == first.group_ids
+    assert second.incidents_created == 0 and second.incidents_reused == 1
+    assert second.incident_ids == first.incident_ids, "历史同类事故要并入，不是新开"
+
+
+def test_insight_is_linked_to_the_incident_of_its_evidence(session, ctx):
+    """结论与事故的关联**按证据事件**判定，不按标题字符串碰运气。"""
+    project, source, run = ctx
+    event_ids = _seed_events(session, project, source, 4)
+    grouping = _grouping(session, project, run, source, event_ids)
+    session.flush()
+
+    insights = InsightRepository(session)
+    persist_insights(
+        project_id=project.id,
+        run_id=run.id,
+        insights=[_insight("崩溃相关结论", [str(event_ids[0])])],
+        valid_event_ids={str(e) for e in event_ids},
+        insight_repository=insights,
+        evidence_repository=EvidenceRepository(session),
+        source_id=source.id,
+        incident_by_event=grouping.incident_by_event,
+    )
+    session.flush()
+    session.expire_all()
+
+    stored = insights.list_for_run(project.id, run.id)
+    assert stored and stored[0].incident_id == grouping.incident_ids[0]
+
+
+def test_recent_incidents_carry_source_and_signature_for_context(session, ctx):
+    """历史事故注入 Context 需要 source_id 与 signature —— 二者都由落库派生。"""
+    project, source, run = ctx
+    event_ids = _seed_events(session, project, source, 2)
+    _grouping(session, project, run, source, event_ids + event_ids)
+    session.flush()
+    session.expire_all()
+
+    history = IncidentRepository(session).recent_for_context(project.id)
+    assert len(history) == 1
+    assert history[0]["signature"] == "ProcessCrash", "签名要从标题前缀取回"
+    assert history[0]["source_id"] == source.id, "source_id 要从成员分组派生"
+    assert history[0]["time_start"] == T0
+
+
+# ============================================================
+# 回归：候选知识写 staging + confirmed 知识参与分析
+# ============================================================
+
+
+def test_worker_stages_knowledge_candidates(monkeypatch, work_tmp):
+    """计划第 751 行：候选知识写入 staging。
+
+    不写的话报告页「待确认知识」区永远是空的 —— 8.1 知识闭环只剩"人工确认"这一半，
+    没有候选可确认（真机核验：staging 文件始终不存在）。
+    """
+    from app.tasks import analysis as task_module
+
+    class _Settings:
+        data_dir = str(work_tmp)
+
+    class _Domain:
+        domain_id = "computer_monitoring"
+
+    class _Result:
+        knowledge_candidates = [
+            {
+                "kind": "error_pattern",
+                "title": "磁盘写入延迟飙升",
+                "description": "iostat await 持续 > 100ms",
+                "match": {"metric_name": "disk_await"},
+                "evidence_ids": ["11"],
+                "status": "draft",
+            }
+        ]
+        valid_event_ids = ["11"]
+
+    monkeypatch.setattr(task_module, "_settings", lambda: _Settings())
+    task_module._stage_knowledge_candidates(_Domain(), _Result(), run_id=7)
+
+    path = staging_path(work_tmp, "computer_monitoring")
+    assert path.is_file(), "候选没有落进 staging"
+    stored = load_candidates(path)
+    assert len(stored) == 1
+    assert stored[0]["title"] == "磁盘写入延迟飙升"
+    assert stored[0]["status"] == "draft", "候选一律 draft，人工确认前不参与结论"
+    assert stored[0]["evidence"]["event_ids"] == ["11"]
+
+
+def test_confirmed_knowledge_is_loaded_for_analysis(monkeypatch, work_tmp):
+    """人工确认过的知识必须参与分析 —— 否则"确认后下次能命中"不成立。"""
+    import yaml
+
+    from app.domains.wiring import build_default_registry
+    from app.tasks import analysis as task_module
+
+    confirmed = work_tmp / "knowledge" / "computer_monitoring" / "confirmed" / "k.yaml"
+    confirmed.parent.mkdir(parents=True, exist_ok=True)
+    confirmed.write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "id": "k_runtime_1",
+                    "kind": "error_pattern",
+                    "title": "CPU 持续高于 90%",
+                    "match": {"metric_name": "cpu_used", "condition": "value > 90"},
+                    "evidence": {"run_id": "1", "event_ids": ["11"]},
+                    "confidence": 0.9,
+                    "status": "confirmed",
+                }
+            ],
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+
+    class _Settings:
+        data_dir = str(work_tmp)
+
+    monkeypatch.setattr(task_module, "_settings", lambda: _Settings())
+    domain = build_default_registry().load("computer_monitoring")
+    entries = task_module.load_confirmed_knowledge(domain)
+    assert [e.id for e in entries] == ["k_runtime_1"]
+    assert entries[0].status == "confirmed"

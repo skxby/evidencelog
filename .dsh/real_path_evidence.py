@@ -165,18 +165,69 @@ def data_dir() -> pathlib.Path:
 
 
 def disk_facts(project_id: int) -> dict:
-    """落盘产物：**写下去的必须是脱敏后的文本**。"""
+    """落盘产物：**写下去的必须是脱敏后的文本**。
+
+    直跑栈（宿主 Web）写的是 `./data/uploads/<pid>/`，容器栈写的是 appdata 卷里的
+    `/app/data/uploads/<pid>/` —— 两条路径都要能查，否则对着容器跑时
+    这一条会"看起来没证据"，而不是"没脱敏"。
+    """
     folder = data_dir() / "uploads" / str(project_id)
     files = sorted(p for p in folder.glob("*")) if folder.exists() else []
     out: dict = {"dir": str(folder.relative_to(ROOT)).replace("\\", "/"), "files": [p.name for p in files]}
     if files:
         text = files[0].read_text(encoding="utf-8", errors="replace")
-        out["canary_email_on_disk"] = CANARY_EMAIL in text
-        out["canary_secret_on_disk"] = CANARY_SECRET in text
-        out["email_markers"] = text.count("[EMAIL_")
-        out["secret_markers"] = text.count("[SECRET_")
-        out["lines"] = text.count("\n")
-    return out
+        out.update(_masking_facts(text))
+        return out
+
+    container = _disk_facts_in_container(project_id)
+    return container or out
+
+
+def _masking_facts(text: str) -> dict:
+    return {
+        "canary_email_on_disk": CANARY_EMAIL in text,
+        "canary_secret_on_disk": CANARY_SECRET in text,
+        "email_markers": text.count("[EMAIL_"),
+        "secret_markers": text.count("[SECRET_"),
+        "lines": text.count("\n"),
+    }
+
+
+def _disk_facts_in_container(project_id: int) -> dict | None:
+    """宿主机看不到卷时，进容器读一次（同一份卷，web/worker 都挂着它）。"""
+    import subprocess
+
+    script = (
+        "import json,pathlib;"
+        f"p=pathlib.Path('/app/data/uploads/{project_id}');"
+        "fs=sorted(x for x in p.glob('*')) if p.exists() else [];"
+        "t=fs[0].read_text(encoding='utf-8',errors='replace') if fs else '';"
+        "print(json.dumps({'dir':str(p),'files':[x.name for x in fs],"
+        f"'canary_email_on_disk':{CANARY_EMAIL!r} in t,"
+        f"'canary_secret_on_disk':{CANARY_SECRET!r} in t,"
+        "'email_markers':t.count('[EMAIL_'),'secret_markers':t.count('[SECRET_'),"
+        "'lines':t.count(chr(10))}))"
+    )
+    try:
+        proc = subprocess.run(
+            ["docker", "compose", "exec", "-T", "web", "python", "-c", script],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except Exception:  # noqa: BLE001 - 没有 docker 就用宿主结果
+        return None
+    for line in reversed((proc.stdout or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return None
 
 
 def merge(patch: dict) -> dict:
@@ -218,6 +269,11 @@ def scenario(eng, name: str, source: pathlib.Path, fmt: str, *, canary: bool) ->
     final = poll(pid, run_id, token) if run_id else {}
     _, detail = call("GET", f"/api/runs/{run_id}/detail?project_id={pid}", token=token)
     _, insights = call("GET", f"/api/runs/{run_id}/insights?project_id={pid}", token=token)
+    # 候选知识是否真的进了 staging：经**知识审核接口**读（真机的文件在容器卷里，
+    # 宿主机看不到；这个接口本身就是页面上「待确认知识」区的数据来源）。
+    _, candidates = call(
+        "GET", f"/api/projects/{pid}/knowledge/candidates", token=token, timeout=60
+    )
 
     run = rows(eng, "select * from agent_runs where id=:rid", rid=run_id)[0] if run_id else {}
     budget = rows(eng, "select budget_total, budget_used from projects where id=:pid", pid=pid)[0]
@@ -264,7 +320,21 @@ def scenario(eng, name: str, source: pathlib.Path, fmt: str, *, canary: bool) ->
             ),
             "event_groups": scalar(eng, "select count(*) from event_groups where project_id=:pid", pid=pid),
             "incidents": scalar(eng, "select count(*) from incidents where project_id=:pid", pid=pid),
+            "events_with_group": scalar(
+                eng, "select count(*) from events where project_id=:pid and group_id is not null", pid=pid
+            ),
+            "events_with_incident": scalar(
+                eng, "select count(*) from events where project_id=:pid and incident_id is not null", pid=pid
+            ),
+            "insights_with_incident": scalar(
+                eng, "select count(*) from insights where run_id=:rid and incident_id is not null", rid=run_id
+            ),
             "insights": scalar(eng, "select count(*) from insights where run_id=:rid", rid=run_id),
+            "insights_with_runbook": scalar(
+                eng,
+                "select count(*) from insights where run_id=:rid and run_metadata ? 'runbooks'",
+                rid=run_id,
+            ),
             "evidences": len(evidence_rows),
             "fact_without_evidence": scalar(
                 eng,
@@ -282,6 +352,10 @@ def scenario(eng, name: str, source: pathlib.Path, fmt: str, *, canary: bool) ->
                 secret=CANARY_SECRET,
             ),
         },
+        "tool_usage": run.get("tool_usage"),
+        "staged_candidates": (
+            len(candidates) if isinstance(candidates, list) else candidates
+        ),
         "insights": rows(
             eng,
             "select id, type, severity, confidence, title, run_metadata from insights"

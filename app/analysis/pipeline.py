@@ -52,7 +52,6 @@ from app.analysis.grouping import (
 )
 from app.gateways.base import TIER_L0, TIER_L2, TIER_L3, StructuredOutputError
 from app.policy.cost_controller import StopExecution
-from app.tools.data_ops import stats_calculator
 
 #: 各等级的输出 token 预算。
 #: 输入侧由阶段 07 的 CONTEXT_BUDGET_BY_TIER 控制，这里管**输出**。
@@ -86,7 +85,21 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string"},
+                    "kind": {
+                        "type": "string",
+                        # 取值必须落在领域知识加载器的白名单里
+                        # （app/domains/computer_monitoring/knowledge/_loader.py 的
+                        # VALID_KINDS）。schema 不写死的话，模型会自己发明
+                        # `new_pattern` / `rule_gap` 这类 kind，
+                        # 写进 staging 后**整份知识文件加载失败** ——
+                        # 真机核验（2026-09-24）就是这么把知识闭环断掉的。
+                        "enum": [
+                            "error_pattern",
+                            "root_cause_hint",
+                            "fix_suggestion",
+                            "false_positive",
+                        ],
+                    },
                     "title": {"type": "string"},
                     "description": {"type": "string"},
                     "match": {"type": "object"},
@@ -139,6 +152,8 @@ class PipelineResult:
     stop_reason: str | None = None
     #: 模型调用与重试的留痕
     model_attempts: list[dict[str, Any]] = field(default_factory=list)
+    #: 工具执行记录（阶段 05 验收：执行结果可记录到 Run）
+    tool_runs: list[dict[str, Any]] = field(default_factory=list)
     evidence_rejections: int = 0
     notes: list[str] = field(default_factory=list)
     valid_event_ids: list[str] = field(default_factory=list)
@@ -159,6 +174,7 @@ class PipelineResult:
             "anomaly_count": len(self.anomalies),
             "evidence_rejections": self.evidence_rejections,
             "used_rules_only": self.used_rules_only,
+            "tool_runs": list(self.tool_runs),
             "notes": list(self.notes),
         }
 
@@ -173,9 +189,31 @@ def build_valid_event_ids(events: list[dict[str, Any]]) -> set[str]:
     return {str(e["event_id"]) for e in events if e.get("event_id") is not None}
 
 
-def compute_statistics(events: list[dict[str, Any]]) -> dict[str, Any]:
-    """统计（复用阶段 05 的 stats_calculator，不重复实现）。"""
-    return stats_calculator(events)
+def compute_statistics(
+    events: list[dict[str, Any]], *, registry: Any = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """统计：**经阶段 05 的工具注册表执行**，不绕过它。
+
+    为什么必须经注册表：验收写着「注册器能按名取用；执行结果可记录到 Run」，
+    而此前这里是 `from app.tools.data_ops import stats_calculator` 直接调用 ——
+    注册表在生产路径上一次都没被用过（真机核验：执行 0 次，
+    `get_tool_registry` 只有测试在调）。走注册表还顺带拿到耗时与输入条数，
+    可以落进 `Run.tool_usage` 供排障。
+
+    返回 `(统计结果, 工具执行记录)`；执行失败**抛错**而不是降级 ——
+    统计是所有后续步骤的基础，静默给个空字典会让链路"成功地产出零结论"。
+    """
+    from app.tools import get_tool_registry
+
+    tool_registry = registry if registry is not None else get_tool_registry()
+    outcome = tool_registry.call("stats_calculator", events=events)
+    if not outcome.ok:
+        raise ToolExecutionError(f"stats_calculator 执行失败：{outcome.error}")
+    return dict(outcome.output or {}), outcome.as_dict()
+
+
+class ToolExecutionError(RuntimeError):
+    """工具执行失败 —— 明确失败，不静默降级（红线 4）。"""
 
 
 def run_detection(
@@ -325,8 +363,9 @@ def analyze(
     events = list(pipeline_input.events)
     valid_ids = build_valid_event_ids(events)
 
-    # ---- 指标计算 + 统计 ----
-    statistics = compute_statistics(events)
+    # ---- 指标计算 + 统计（经工具注册表）----
+    statistics, stats_tool_run = compute_statistics(events)
+    tool_runs: list[dict[str, Any]] = [stats_tool_run]
 
     # ---- 模板聚类 / 分组 ----
     groupable = [
@@ -422,6 +461,7 @@ def analyze(
         statistics=statistics,
         notes=list(detection_notes),
         valid_event_ids=sorted(valid_ids, key=lambda x: (len(x), x)),
+        tool_runs=tool_runs,
     )
 
     # ---- L0：纯代码统计报告，不调用模型 ----
@@ -436,7 +476,8 @@ def analyze(
         return result
 
     # ---- Context 组装与蒸馏 ----
-    samples = _select_samples(events)
+    samples, filter_tool_run = _select_samples(events)
+    result.tool_runs.append(filter_tool_run)
     context = build_distilled_context(
         tier=complexity.tier,
         metadata={
@@ -610,12 +651,28 @@ def _group_severity(group: dict[str, Any], events: list[dict[str, Any]]) -> str:
     return worst
 
 
-def _select_samples(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """错误事件全给，警告/正常事件采样（计划第 789 行）。"""
-    errors = [e for e in events if str(e.get("severity", "")).lower() == "high"]
-    others = [e for e in events if str(e.get("severity", "")).lower() != "high"]
+def _select_samples(
+    events: list[dict[str, Any]], *, registry: Any = None
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """错误事件全给，警告/正常事件采样（计划第 789 行）。
+
+    "按 severity 过滤"这一步交给阶段 05 的 `event_filter` 工具，而不是就地写
+    一遍列表推导 —— 这个工具本来干的就是这件事，此前是注册表没人取用、
+    管线自己重复实现了一份（真机核验：`event_filter` 执行 0 次）。
+    """
+    from app.tools import get_tool_registry
+
+    tool_registry = registry if registry is not None else get_tool_registry()
+    outcome = tool_registry.call("event_filter", events=events, severities=["high"])
+    if not outcome.ok:
+        raise ToolExecutionError(f"event_filter 执行失败：{outcome.error}")
+    matched = {
+        int(i) for i in ((outcome.output or {}).get("matched_event_ids") or [])
+    }
+    errors = [e for e in events if int(e.get("event_id") or 0) in matched]
+    others = [e for e in events if int(e.get("event_id") or 0) not in matched]
     # 采样式取前 N 条（确定性：不用 random，保证同输入同输出）
-    return errors + others[:200]
+    return errors + others[:200], outcome.as_dict()
 
 
 def _incidents_for_context(
@@ -777,7 +834,13 @@ def _build_prompt(context: DistilledContext) -> str:
 
 
 def _validate_candidates(raw: Any, valid_ids: set[str]) -> list[dict[str, Any]]:
-    """校验候选知识：同样要求 evidence 是本次有效 id 的子集（计划第 827 行）。"""
+    """校验候选知识：同样要求 evidence 是本次有效 id 的子集（计划第 827 行）。
+
+    `kind` 还要**归一化**到领域白名单内（`VALID_KINDS`）：schema 里已经用 enum
+    约束过，但模型偶尔仍会自造词（真机出现过 `new_pattern` / `rule_gap`）。
+    归一化而不是丢弃：候选的价值在证据与描述，类别可以落回最贴近的一类；
+    真正的兜底在加载器那边（不在白名单就拒载），所以这里必须**保证**写出去的合法。
+    """
     if not raw or not isinstance(raw, (list, tuple)):
         return []
     out: list[dict[str, Any]] = []
@@ -785,6 +848,7 @@ def _validate_candidates(raw: Any, valid_ids: set[str]) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         from app.analysis.evidence import normalize_evidence_ids
+        from app.domains.protocol import VALID_KNOWLEDGE_KINDS
 
         evidence = normalize_evidence_ids(item.get("evidence_ids"))
         kept = [e for e in evidence if e in valid_ids]
@@ -793,7 +857,9 @@ def _validate_candidates(raw: Any, valid_ids: set[str]) -> list[dict[str, Any]]:
             continue
         out.append(
             {
-                "kind": str(item.get("kind", "error_pattern")),
+                "kind": normalize_knowledge_kind(
+                    item.get("kind"), allowed=VALID_KNOWLEDGE_KINDS
+                ),
                 "title": str(item.get("title", "")),
                 "description": str(item.get("description", "")),
                 "match": item.get("match") or {},
@@ -805,6 +871,31 @@ def _validate_candidates(raw: Any, valid_ids: set[str]) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+#: 模型自造词 → 白名单内的类别。只映射语义上确实等价的，不做兜底猜测。
+KNOWLEDGE_KIND_ALIASES: dict[str, str] = {
+    "new_pattern": "error_pattern",
+    "pattern": "error_pattern",
+    "rule_gap": "error_pattern",
+    "anomaly_pattern": "error_pattern",
+    "cause": "root_cause_hint",
+    "root_cause": "root_cause_hint",
+    "fix": "fix_suggestion",
+    "suggestion": "fix_suggestion",
+    "false_alert": "false_positive",
+}
+
+
+def normalize_knowledge_kind(raw: Any, *, allowed: tuple[str, ...] | list[str]) -> str:
+    """把候选的 `kind` 归一化到白名单内；实在认不出的落到 `error_pattern`。"""
+    text = str(raw or "").strip().lower()
+    if text in allowed:
+        return text
+    mapped = KNOWLEDGE_KIND_ALIASES.get(text)
+    if mapped in allowed:
+        return str(mapped)
+    return "error_pattern"
 
 # ============================================================
 # runbook 挂接（计划第 89、412、909 行）
@@ -826,6 +917,8 @@ def attach_runbooks(anomalies: list[dict[str, Any]], *, domain: Any) -> int:
             str(anomaly.get("type", "")),
             str(anomaly.get("message", "")),
             anomaly.get("metric_name"),
+            # 命中的关键词要一起带过去：命中可能来自进程名，消息正文里没有那个词
+            matched_pattern=str((anomaly.get("detail") or {}).get("pattern") or ""),
         )
         if book is None:
             continue

@@ -2,7 +2,10 @@ id: rb_crash_001
 title: 进程崩溃处置
 applies:
   analyzer: ProcessCrash
-  message_pattern: "segfault|segmentation fault|core dumped|panic"
+  # 关键词表必须与 analyzer 的 CRASH_PATTERNS 对齐（app/domains/computer_monitoring/
+  # analyzers/__init__.py）。`crash` 是最常见的命中词（崩溃上报进程名里就有），
+  # 漏了它 = 真机上一份 runbook 都挂不上（2026-09-24 真机核验）。
+  message_pattern: "segfault|segmentation fault|core dumped|panic|crash"
 steps:
   - "确认崩溃进程名、PID 与崩溃时间点"
   - "检查是否有 core dump 生成，路径与大小"

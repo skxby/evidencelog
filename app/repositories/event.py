@@ -98,6 +98,53 @@ class EventRepository(ProjectScopedRepository[Event]):
         ).all()
         return {severity: int(count) for severity, count in rows}
 
+    def assign_group(self, project_id: int, event_ids: list[Any], group_id: int) -> int:
+        """把成员事件挂到分组上（`Event.group_id` 是分组关系的**真源**）。
+
+        为什么用一条 UPDATE 而不是逐条改对象：分组一次可能覆盖几千条事件，
+        逐条走 ORM 会把内存与 SQL 次数都放大到不可接受。
+        返回受影响行数 —— 调用方据此判断"分组是不是真的落上了"。
+        """
+        from sqlalchemy import update
+
+        ids = [int(e) for e in event_ids]
+        if not ids:
+            return 0
+        result = self.session.execute(
+            update(Event)
+            .where(Event.project_id == project_id, Event.id.in_(ids))
+            .values(group_id=group_id)
+            .execution_options(synchronize_session=False)
+        )
+        return int(result.rowcount or 0)
+
+    def assign_incident(self, project_id: int, group_ids: list[Any], incident_id: int) -> int:
+        """按分组把成员事件挂到事故上（成员关系由 `group_id` 派生，不双写）。"""
+        from sqlalchemy import update
+
+        ids = [int(g) for g in group_ids]
+        if not ids:
+            return 0
+        result = self.session.execute(
+            update(Event)
+            .where(Event.project_id == project_id, Event.group_id.in_(ids))
+            .values(incident_id=incident_id)
+            .execution_options(synchronize_session=False)
+        )
+        return int(result.rowcount or 0)
+
+    def events_in_groups(self, project_id: int, group_ids: list[Any]) -> list[int]:
+        """按分组取成员事件 id（`incident_id → group_ids → events` 的最后一步）。"""
+        ids = [int(g) for g in group_ids]
+        if not ids:
+            return []
+        rows = self.session.execute(
+            select(Event.id)
+            .where(Event.project_id == project_id, Event.group_id.in_(ids))
+            .order_by(Event.id)
+        ).scalars().all()
+        return [int(r) for r in rows]
+
     def add_metric(
         self,
         project_id: int,

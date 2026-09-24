@@ -77,6 +77,23 @@ def _execute(
         # 而这个数字是唯一能一眼看出来的证据
         logger.info("run_events_loaded", event_count=len(events))
 
+        # 历史相似事故（计划第 787 行）与 confirmed 知识（阶段 03 的加载器）。
+        #
+        # 这两项此前**在 app/ 里没有任何赋值处** —— `PipelineInput` 里留着字段与默认空表，
+        # 真实路径永远传空。后果：`incidents` 表是空的，"历史事故记忆库"没有内容可注入；
+        # 人工确认过的知识也从不参与分析，"确认后下次能命中"因此不成立。
+        from app.repositories.incident import IncidentRepository
+
+        historical_incidents = load_historical_incidents(
+            IncidentRepository(session), project_id
+        )
+        confirmed_knowledge = load_confirmed_knowledge(domain)
+        logger.info(
+            "run_context_sources",
+            historical_incidents=len(historical_incidents),
+            confirmed_knowledge=len(confirmed_knowledge),
+        )
+
         executor = RunExecutor(run_repository=runs, checkpoint=session.commit)
         captured: dict[str, Any] = {}
 
@@ -142,6 +159,8 @@ def _execute(
                     time_start=run.started_at or _utcnow(),
                     time_end=_utcnow(),
                     events=events,
+                    historical_incidents=historical_incidents,
+                    confirmed_knowledge=confirmed_knowledge,
                 ),
                 analyzers=domain.analyzers(),
                 domain=domain,
@@ -151,6 +170,9 @@ def _execute(
                 run_id=run_id,
             )
             captured["result"] = result
+            # 工具执行记录落进 Run（阶段 05 验收）：不记的话，
+            # "工具跑了没有、跑了多久、处理多少条"在事后完全无从查起。
+            _record_tool_usage(runs, project_id, run_id, result)
             # 关键节点留痕：**这才是 trace_id 能派上用场的地方**。
             # 计划第 928 行要求"同一条 trace 串起请求与执行"，可早先整条成功路径
             # 一条日志都不打 —— 于是拿 trace_id 去 grep 什么都捞不到，
@@ -175,6 +197,9 @@ def _execute(
                 session, project_id=project_id, run_id=run_id, run=run, result=result
             )
             logger.info("insights_persisted", **captured["persisted"])
+            # 候选知识写 staging（计划第 751 行）：不写的话「待确认知识」区永远是空的，
+            # 8.1 知识闭环只剩"人工确认"这一半 —— 没有候选可确认。
+            _stage_knowledge_candidates(domain, result, run_id=run_id)
 
             if result.stop_reason:
                 # 策略到顶：把**已经拿到的结论落库之后**再上抛，
@@ -202,6 +227,8 @@ def _execute(
                     time_start=run.started_at or _utcnow(),
                     time_end=_utcnow(),
                     events=events,
+                    historical_incidents=historical_incidents,
+                    confirmed_knowledge=confirmed_knowledge,
                 ),
                 analyzers=domain.analyzers(),
                 domain=domain,
@@ -317,7 +344,7 @@ def _execute(
 def _persist_result(
     session: Any, *, project_id: int, run_id: int, run: Any, result: Any
 ) -> dict[str, int]:
-    """把结论与证据落库；失败必须变成一次**明确的**失败，不许静默。
+    """把分组、事故、结论与证据落库；失败必须变成一次**明确的**失败，不许静默。
 
     - 证据闸门拒绝（结论本身不合格）→ `ValidationFailureError`（不可重试）
     - 数据库写不进去（约束冲突、连接中断…）→ `StorageFailureError`（不可重试）
@@ -325,23 +352,42 @@ def _persist_result(
     两者都不可重试的理由一样：模型已经调完、钱已经花了，重试只会产出
     同一份写不进去的结论，再花一次钱。降级链会因此立即收尾成 `failed`
     并把真实原因写进 Run.error，而不是继续往下白白烧钱。
+
+    顺序：**先分组/事故，再结论** —— 结论的 `incident_id` 要靠事故的成员事件派生。
     """
-    if result is None or not result.insights:
+    if result is None:
         return {"insight_count": 0, "evidence_count": 0}
 
     from sqlalchemy.exc import SQLAlchemyError
 
     from app.analysis.idempotency import StorageFailureError, ValidationFailureError
-    from app.analysis.persistence import EvidencePersistenceError, persist_insights
+    from app.analysis.persistence import (
+        EvidencePersistenceError,
+        persist_grouping,
+        persist_insights,
+    )
+    from app.repositories.event import EventRepository
+    from app.repositories.event_group import EventGroupRepository
     from app.repositories.evidence import EvidenceRepository
+    from app.repositories.incident import IncidentRepository
     from app.repositories.insight import InsightRepository
 
     written = None
+    grouping = None
     try:
         # SAVEPOINT：落库失败只回滚这一小段，外层事务仍然可用 ——
         # 否则 PG 会把整个事务置为 aborted，连"把失败写进 Run"都做不到，
         # 于是又变成"任务崩了、Run 停在 queued"。
         with session.begin_nested():
+            grouping = persist_grouping(
+                project_id=project_id,
+                run_id=run_id,
+                groups=list(result.groups or []),
+                incidents=list(result.incidents or []),
+                group_repository=EventGroupRepository(session),
+                incident_repository=IncidentRepository(session),
+                event_repository=EventRepository(session),
+            )
             written = persist_insights(
                 project_id=project_id,
                 run_id=run_id,
@@ -350,6 +396,7 @@ def _persist_result(
                 insight_repository=InsightRepository(session),
                 evidence_repository=EvidenceRepository(session),
                 source_id=int(run.source_id) if run.source_id else None,
+                incident_by_event=grouping.incident_by_event,
             )
     except EvidencePersistenceError as exc:
         logger.error(
@@ -364,7 +411,65 @@ def _persist_result(
         )
         raise StorageFailureError(f"结论落库失败：{type(exc).__name__}: {exc}") from exc
 
-    return written.as_dict()
+    logger.info(
+        "grouping_persisted",
+        run_id=run_id,
+        **(grouping.as_dict() if grouping is not None else {}),
+    )
+    return {**written.as_dict(), **(grouping.as_dict() if grouping is not None else {})}
+
+
+def load_historical_incidents(incident_repository: Any, project_id: int, *, limit: int = 5) -> list[dict]:
+    """取本项目最近的历史事故，供 Context 注入（计划第 787 行）。"""
+    try:
+        return incident_repository.recent_for_context(project_id, limit=limit)
+    except Exception as exc:  # noqa: BLE001 - 历史事故是背景信息，取不到不该让分析失败
+        logger.warning(
+            "historical_incidents_unavailable", error=f"{type(exc).__name__}: {exc}"
+        )
+        return []
+
+
+def load_confirmed_knowledge(domain: Any) -> list[Any]:
+    """加载领域已确认知识（阶段 03 的加载器；候选(staging)不参与）。"""
+    try:
+        knowledge = domain.knowledge(data_dir=_settings().data_dir)
+    except Exception as exc:  # noqa: BLE001 - 知识库读不到不该让分析失败
+        logger.warning("knowledge_unavailable", error=f"{type(exc).__name__}: {exc}")
+        return []
+    return list((knowledge or {}).get("confirmed") or [])
+
+
+def _record_tool_usage(runs: Any, project_id: int, run_id: int, result: Any) -> None:
+    """把工具执行记录写进 `Run.tool_usage`（阶段 05 验收）。"""
+    for entry in getattr(result, "tool_runs", None) or []:
+        runs.append_tool_usage(project_id, run_id, entry)
+
+
+def _stage_knowledge_candidates(domain: Any, result: Any, *, run_id: int) -> None:
+    """把候选知识写入 staging（计划第 751 行）。
+
+    失败只记日志、不让分析失败：候选是**副产品**，主结果是结论与证据；
+    为了一个副产品把整次分析判失败，是把优先级搞反了。
+    """
+    candidates = list(getattr(result, "knowledge_candidates", None) or [])
+    if not candidates:
+        return
+    from app.analysis.knowledge_staging import write_candidates
+
+    try:
+        stats = write_candidates(
+            data_dir=_settings().data_dir,
+            domain_id=getattr(domain, "domain_id", "computer_monitoring"),
+            candidates=candidates,
+            run_id=run_id,
+            valid_event_ids=set(getattr(result, "valid_event_ids", None) or []),
+        )
+        logger.info("knowledge_candidates_staged", **stats)
+    except Exception as exc:  # noqa: BLE001 - 见 docstring
+        logger.warning(
+            "knowledge_staging_failed", error=f"{type(exc).__name__}: {exc}"
+        )
 
 
 def _record_crash(

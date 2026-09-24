@@ -367,24 +367,33 @@ def main(argv: list[str]) -> int:
         estimate = pre.estimate.estimated_cost_with_margin if pre.estimate else None
         tier_config = controller.tier_configs["L3"]
         billed_now = tier_config.estimate_cost(8000, 2000, peak=now_peak)
-        # 高峰时刻的对照：时间用注入的固定时刻（不能改真机时钟），
-        # 配置与函数都是真机的 —— 这样"估算侧不看峰谷"与"计费侧看峰谷"的差额才可比。
         billed_peak = tier_config.estimate_cost(8000, 2000, peak=True)
+        # 估算侧现在也吃 peak（`estimate_run_cost(..., peak=...)`）。
+        # 用真正的估算函数在高峰口径下算一遍，和计费口径比 ——
+        # 两者必须只差 10% 安全边际；此前估算侧根本不知道峰谷，差的是 2 倍。
+        from app.policy.cost_controller import estimate_run_cost
+
+        estimate_peak = estimate_run_cost(
+            "L3", tier_config, peak=True
+        ).estimated_cost_with_margin
         facts["peak_valley"] = {
             "now_is_peak": now_peak,
             "peak_window_probe_0200utc": peak_probe,
+            "controller_peak_now": bool(getattr(controller, "peak_now", None)),
             "pre_check_estimate_L3": estimate,
+            "pre_check_estimate_L3_at_peak": round(estimate_peak, 6),
             "billed_formula_L3_peak_now": round(billed_now, 6),
             "billed_formula_L3_peak_forced": round(billed_peak, 6),
             "peak_multiplier": tier_config.peak_price_multiplier,
-            "estimate_ignores_peak": True,
+            # 估算 = 计费 × 1.1（安全边际）—— 两个口径终于统一
+            "estimate_tracks_peak": abs(estimate_peak - billed_peak * 1.1) < 1e-9,
         }
         print(
-            f"⑦ 此刻是否高峰={now_peak}（北京 10:00 探测={peak_probe}）｜"
-            f"Pre-check 估算 ¥{estimate:.6f}（**与峰谷无关**）｜"
-            f"同一份 token 在高峰时刻的实际计费 ¥{billed_peak:.6f}"
-            f"（倍数 {tier_config.peak_price_multiplier}）→ "
-            f"高峰时段估算比实际低 {billed_peak / estimate:.2f} 倍"
+            f"⑦ 此刻是否高峰={now_peak}（装配出的控制器 peak_now="
+            f"{getattr(controller, 'peak_now', None)}）｜Pre-check 估算 ¥{estimate:.6f}"
+            f"（闲时口径）｜同一份 token 走高峰口径：估算 ¥{estimate_peak:.6f} vs 计费 "
+            f"¥{billed_peak:.6f}（倍数 {tier_config.peak_price_multiplier}，"
+            f"估算=计费×1.1 安全边际：{facts['peak_valley']['estimate_tracks_peak']}）"
         )
 
     payload = json.loads(EVIDENCE.read_text(encoding="utf-8")) if EVIDENCE.exists() else {}

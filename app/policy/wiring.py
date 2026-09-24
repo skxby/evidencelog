@@ -75,8 +75,29 @@ def build_cost_controller(
         project_budget_total=total,
         project_budget_used=used,
         month_spent=month_spent,
+        # 峰谷价必须同时进**估算**与**计费**两侧：估值按闲时价算的话，
+        # 高峰时段的预检会低估一倍，该拦的 Run 就放过去了（真机核验 2026-09-24）。
+        peak_now=_is_peak_now(settings),
         clock=clock,
     )
+
+
+def _is_peak_now(settings: Any) -> bool:
+    """此刻是否处于供应商高峰时段（与 `Router._is_peak_now` 同一判断）。"""
+    from datetime import datetime, timezone
+
+    from app.utils.timestamps import is_peak_time
+
+    try:
+        return bool(
+            is_peak_time(
+                datetime.now(timezone.utc),
+                default_timezone=getattr(settings, "default_timezone", "Asia/Shanghai")
+                or "Asia/Shanghai",
+            )
+        )
+    except Exception:  # noqa: BLE001 - 时区配置不可读时按闲时价估（与旧行为一致）
+        return False
 
 
 def month_start(*, settings: Any = None, now: Any = None) -> Any:

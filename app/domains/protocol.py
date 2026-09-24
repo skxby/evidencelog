@@ -96,6 +96,18 @@ class Runbook:
     references: list[str] = field(default_factory=list)
 
 
+#: 知识类别白名单 —— **领域契约的一部分**，不是某个领域包的私事。
+#: 放在协议层是因为两侧都要用：领域加载器按它校验 YAML，
+#: 而核心 Runtime 在把模型候选写进 staging 之前必须归一化到它
+#: （Runtime 不能 import 具体领域，红线 8）。
+VALID_KNOWLEDGE_KINDS: tuple[str, ...] = (
+    "error_pattern",
+    "root_cause_hint",
+    "fix_suggestion",
+    "false_positive",
+)
+
+
 @dataclass(frozen=True)
 class KnowledgeEntry:
     """一条领域知识（计划第 455–475 行的结构）。

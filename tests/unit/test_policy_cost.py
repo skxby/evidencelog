@@ -602,3 +602,51 @@ def test_policy_from_settings_reads_both_money_knobs(monkeypatch):
     policy = policy_from_settings()
     assert policy.run_max_cost == pytest.approx(0.05)
     assert policy.monthly_budget == pytest.approx(0.02), "月度预算没从配置读，改 .env 不生效"
+
+
+# ============================================================
+# 回归（2026-09-24 真机核验）：峰谷价必须同时进估算侧
+# ============================================================
+
+
+def _peak_tiers():
+    return {
+        "L1": TierConfig("L1", "m-small", "off", 1.0, 4.0, peak_price_multiplier=2.0),
+        "L2": TierConfig("L2", "m-medium", "low", 1.0, 4.0, peak_price_multiplier=2.0),
+        "L3": TierConfig("L3", "m-large", "high", 1.0, 4.0, peak_price_multiplier=2.0),
+    }
+
+
+def test_pre_check_estimate_follows_peak_pricing():
+    """高峰时段的预检必须按高峰价估。
+
+    此前 `estimate_run_cost()` 从不传 `peak`，而计费侧（`Router.generate`）传了 ——
+    同一份单价两个口径。真机核验：高峰时估算 ¥0.0176 vs 实际计费 ¥0.032，低估 1.82 倍。
+    """
+    tiers = _peak_tiers()
+    off = CostController(RunPolicy(), tier_configs=tiers, peak_now=False)
+    on = CostController(RunPolicy(), tier_configs=tiers, peak_now=True)
+
+    off_estimate = off.pre_check("L3").estimate.estimated_cost_with_margin
+    on_estimate = on.pre_check("L3").estimate.estimated_cost_with_margin
+    assert on_estimate == pytest.approx(off_estimate * 2, rel=1e-9), "估算侧没跟峰谷走"
+
+
+def test_peak_estimate_can_reject_a_run_that_off_peak_would_allow():
+    """低估的方向恰好是"该拦不拦"：预算卡在两者之间时必须拦下。"""
+    tiers = _peak_tiers()
+    off_estimate = (
+        CostController(RunPolicy(), tier_configs=tiers, peak_now=False)
+        .pre_check("L3")
+        .estimate.estimated_cost_with_margin
+    )
+    budget = off_estimate * 1.5  # 闲时够、高峰不够
+
+    off = CostController(
+        RunPolicy(), tier_configs=tiers, project_budget_total=budget, peak_now=False
+    )
+    on = CostController(
+        RunPolicy(), tier_configs=tiers, project_budget_total=budget, peak_now=True
+    )
+    assert off.pre_check("L3").allowed is True
+    assert on.pre_check("L3").allowed is False, "高峰价下预算不够，必须拒绝创建"

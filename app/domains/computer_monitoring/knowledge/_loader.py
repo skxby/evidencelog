@@ -17,15 +17,24 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from app.domains.protocol import KnowledgeEntry, KnowledgeNotConfirmableError
+from app.domains.protocol import (
+    VALID_KNOWLEDGE_KINDS,
+    KnowledgeEntry,
+    KnowledgeNotConfirmableError,
+)
 
-VALID_KINDS = ("error_pattern", "root_cause_hint", "fix_suggestion", "false_positive")
+#: 白名单的**真源在协议层**（`app/domains/protocol.py`）：核心 Runtime 也要按它
+#: 归一化模型候选，不能各写一份。
+VALID_KINDS = VALID_KNOWLEDGE_KINDS
 VALID_STATUSES = ("draft", "confirmed", "deprecated")
+
+logger = logging.getLogger(__name__)
 
 #: V1 只支持这些固定操作符，**不做通用表达式引擎**（计划第 462、501 行）
 ALLOWED_OPERATORS = (">", "<", "=", ">=", "<=", "!=")
@@ -119,33 +128,70 @@ def assert_confirmable(entry: KnowledgeEntry) -> None:
         )
 
 
-def load_entries_from_file(path: Path) -> list[KnowledgeEntry]:
+def load_entries_from_file(
+    path: Path, *, tolerate_bad_entries: bool = False
+) -> list[KnowledgeEntry]:
+    """读一个 YAML 文件里的条目。
+
+    `tolerate_bad_entries`：运行时文件（数据卷里的 confirmed / staging）用 True ——
+    **逐条**跳过不合法的条目并指名告警，而不是一条坏条目带走整个文件。
+    真机核验（2026-09-24）：模型自造 `kind=new_pattern` 的条目把同文件里
+    人工确认过的那条也一起废掉了（整份文件抛错）。
+    """
     if not path.is_file():
         return []
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if raw is None:
         return []
     entries = raw if isinstance(raw, list) else [raw]
-    return [validate_entry(e, source=path.name) for e in entries]
+    out: list[KnowledgeEntry] = []
+    for entry in entries:
+        try:
+            out.append(validate_entry(entry, source=path.name))
+        except (KnowledgeFormatError, KnowledgeNotConfirmableError) as exc:
+            if not tolerate_bad_entries:
+                raise
+            logger.warning("知识条目被跳过（不合法）：%s（%s）", exc, path)
+    return out
 
 
-def load_confirmed(directory: Path) -> list[KnowledgeEntry]:
-    """加载 `confirmed/` 下所有知识。"""
+def load_confirmed(
+    directory: Path, *, tolerate_bad_files: bool = False
+) -> list[KnowledgeEntry]:
+    """加载 `confirmed/` 下所有知识。
+
+    `tolerate_bad_files` 区分**代码资产**与**运行时数据**：
+      - seed（仓库内）保持严格：坏文件就是代码 bug，应当当场炸、由测试拦住；
+      - 运行时 confirmed（数据卷里，可能被旧版本或手工编辑写坏）用 True：
+        跳过坏文件并**指名告警**，不让一个坏文件把其余已确认知识一起带走。
+        真机核验（2026-09-24）撞到的就是这个：一条模型自造 `kind` 的条目
+        让整个 `knowledge()` 抛错，`confirmed_knowledge` 直接变 0。
+    """
     if not directory.is_dir():
         return []
     out: list[KnowledgeEntry] = []
     for path in sorted(directory.glob("*.y*ml")):
-        out.extend(load_entries_from_file(path))
+        try:
+            out.extend(
+                load_entries_from_file(path, tolerate_bad_entries=tolerate_bad_files)
+            )
+        except KnowledgeFormatError as exc:
+            if not tolerate_bad_files:
+                raise
+            logger.warning("confirmed 知识文件被跳过（不合法）：%s（%s）", exc, path)
     return out
 
 
-def load_staging(path: Path) -> list[KnowledgeEntry]:
+def load_staging(path: Path, *, tolerate_bad_entries: bool = False) -> list[KnowledgeEntry]:
     """加载 staging 候选。
 
     候选**一律是 draft**（约束 1/4）：即便文件里写了 confirmed，也在这里降级，
     因为候选来自模型生成、尚未经人工确认。
+
+    `tolerate_bad_entries`：staging 是模型写的，运行时加载用 True ——
+    逐条跳过不合法条目（告警指名），别让一条自造 kind 的候选把整份候选列表废掉。
     """
-    entries = load_entries_from_file(path)
+    entries = load_entries_from_file(path, tolerate_bad_entries=tolerate_bad_entries)
     downgraded: list[KnowledgeEntry] = []
     for entry in entries:
         if entry.status != "draft":
@@ -167,8 +213,21 @@ def load_all(domain_dir: Path, data_dir: Path | None = None, domain_id: str = ""
 
     if data_dir is not None and domain_id:
         base = Path(data_dir) / "knowledge" / domain_id
-        runtime = load_confirmed(base / "confirmed")
-        staging = load_staging(base / "staging" / "candidates.yaml")
+        # 运行时数据：坏文件跳过（告警指名），不连累其余知识
+        runtime = load_confirmed(base / "confirmed", tolerate_bad_files=True)
+        # staging 是**模型写的**，是这堆文件里唯一不受我们控制的一份。
+        # 它坏掉只该让候选失效，不该把人工确认过的知识一起带走 ——
+        # 真机核验（2026-09-24）：模型自造 `kind=new_pattern` 让 `knowledge()`
+        # 整个抛错，`confirmed_knowledge` 直接变 0，闭环断在最后一步。
+        # 仍然**不静默**：把文件名与原因打出来。
+        staging_path = base / "staging" / "candidates.yaml"
+        try:
+            staging = load_staging(staging_path, tolerate_bad_entries=True)
+        except KnowledgeFormatError as exc:
+            # 领域包用 stdlib logging（不依赖 Runtime 的 structlog），
+            # 所以消息自己拼好，别用 kwargs 结构化字段。
+            logger.warning("staging 候选被忽略（文件不合法）：%s（%s）", exc, staging_path)
+            staging = []
 
     merged: dict[str, KnowledgeEntry] = {e.id: e for e in seed}
     for entry in runtime:  # 运行时覆盖 seed

@@ -1165,3 +1165,101 @@ def test_escalation_does_not_happen_without_any_conclusion():
         router=router,
     )
     assert router.tiers == ["L2"], f"无结论时不该升级，实际 {router.tiers}"
+
+
+# ============================================================
+# 回归（2026-09-24 真机核验）：工具必须经注册表执行，并记进 Run
+#
+# 此前 `compute_statistics` 直接 `from app.tools.data_ops import stats_calculator`
+# 调用，`get_tool_registry` 在生产路径上执行 **0 次** ——
+# 验收写着"注册器能按名取用"，真机上没人取用。
+# ============================================================
+
+
+def test_statistics_go_through_the_tool_registry():
+    import json
+
+    from app.analysis.pipeline import compute_statistics
+
+    events = [
+        {"event_id": 1, "severity": "high", "event_type": "log", "message": "boom",
+         "timestamp": T0, "payload": None, "metadata": {}},
+        {"event_id": 2, "severity": "low", "event_type": "log", "message": "ok",
+         "timestamp": T0, "payload": None, "metadata": {}},
+    ]
+    stats, tool_run = compute_statistics(events)
+
+    assert stats["total"] == 2 and stats["error_count"] == 1
+    assert tool_run["tool"] == "stats_calculator", "统计没有经注册表执行"
+    assert tool_run["ok"] is True and tool_run["items_in"] == 2
+    json.dumps(tool_run)  # 要能进 Run.tool_usage（JSONB），不能带 datetime 之类
+
+
+def test_sample_selection_uses_the_event_filter_tool():
+    from app.analysis.pipeline import _select_samples
+
+    events = [
+        {"event_id": i, "severity": "high" if i % 3 == 0 else "low",
+         "event_type": "log", "message": f"m{i}", "timestamp": T0, "payload": None,
+         "metadata": {}}
+        for i in range(1, 7)
+    ]
+    samples, tool_run = _select_samples(events)
+
+    assert tool_run["tool"] == "event_filter", "按 severity 过滤没有走工具"
+    assert {e["severity"] for e in samples[:2]} == {"high"}, "错误事件仍要全给"
+
+
+def test_tool_runs_are_recorded_into_the_run():
+    from app.tasks.analysis import _record_tool_usage
+
+    class _Runs:
+        def __init__(self):
+            self.calls = []
+
+        def append_tool_usage(self, project_id, run_id, usage):
+            self.calls.append((project_id, run_id, usage))
+            return True
+
+    class _Result:
+        tool_runs = [
+            {"tool": "stats_calculator", "ok": True},
+            {"tool": "event_filter", "ok": True},
+        ]
+
+    runs = _Runs()
+    _record_tool_usage(runs, 7, 9, _Result())
+    assert [c[2]["tool"] for c in runs.calls] == ["stats_calculator", "event_filter"]
+    assert all(c[0] == 7 and c[1] == 9 for c in runs.calls)
+
+
+# ============================================================
+# 回归（2026-09-24 真机核验）：候选的 kind 必须归一化到领域白名单
+# ============================================================
+
+
+def test_candidate_kinds_are_normalized_to_the_domain_whitelist():
+    """模型会自造 kind（真机出现过 `new_pattern` / `rule_gap`）。
+
+    自造词一旦写进 staging，加载器会拒载**整份文件** —— 真机上表现为
+    确认过的知识读不回来（`confirmed_knowledge=0`），闭环断在最后一步。
+    """
+    from app.analysis.pipeline import _validate_candidates, normalize_knowledge_kind
+    from app.domains.protocol import VALID_KNOWLEDGE_KINDS
+
+    raw = [
+        {"kind": "new_pattern", "title": "A", "evidence_ids": ["1"]},
+        {"kind": "rule_gap", "title": "B", "evidence_ids": ["1"]},
+        {"kind": "root_cause_hint", "title": "C", "evidence_ids": ["1"]},
+        {"kind": "完全没见过的词", "title": "D", "evidence_ids": ["1"]},
+    ]
+    kept = _validate_candidates(raw, valid_ids={"1"})
+    kinds = [c["kind"] for c in kept]
+    assert kinds == [
+        "error_pattern",
+        "error_pattern",
+        "root_cause_hint",
+        "error_pattern",
+    ], f"归一化结果不对：{kinds}"
+    assert all(k in VALID_KNOWLEDGE_KINDS for k in kinds)
+    assert normalize_knowledge_kind(None, allowed=VALID_KNOWLEDGE_KINDS) == "error_pattern"

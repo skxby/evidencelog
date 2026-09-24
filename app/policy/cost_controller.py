@@ -97,12 +97,21 @@ class CostEstimate:
 
 
 def estimate_run_cost(
-    tier: str, tier_config: TierConfig, *, planned_calls: int = DEFAULT_PLANNED_CALLS
+    tier: str,
+    tier_config: TierConfig,
+    *,
+    planned_calls: int = DEFAULT_PLANNED_CALLS,
+    peak: bool = False,
 ) -> CostEstimate:
     """按**蒸馏后 Context 预算**估算一次 Run 的成本。
 
     刻意不接收事件条数：按条数线性估会严重高估（采样与压缩会削平），
     从而把本来能跑的 Run 误拒。
+
+    `peak` 必须与**实际计费侧**同一口径（`Router.generate` 用的是
+    `is_peak_time(now)`）：漏传的话，高峰时段估值按闲时价算，
+    比真实账单低一倍 —— 预算是"钱够不够"的闸门，低估的方向恰好是该拦不拦。
+    真机核验（2026-09-24）：高峰时估算 ¥0.0176 vs 同 token 实际计费 ¥0.032，低估 1.82 倍。
     """
     normalized = tier.upper()
     if normalized not in CONTEXT_BUDGET_BY_TIER:
@@ -115,7 +124,7 @@ def estimate_run_cost(
 
     tokens_input = per_call_input * planned_calls
     tokens_output = per_call_output * planned_calls
-    cost = tier_config.estimate_cost(tokens_input, tokens_output)
+    cost = tier_config.estimate_cost(tokens_input, tokens_output, peak=peak)
 
     return CostEstimate(
         tier=normalized,
@@ -196,6 +205,7 @@ class CostController:
         project_budget_total: float | None = None,
         project_budget_used: float = 0.0,
         month_spent: float = 0.0,
+        peak_now: bool = False,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.policy = policy
@@ -203,6 +213,10 @@ class CostController:
         self.project_budget_total = project_budget_total
         self.project_budget_used = project_budget_used
         self.month_spent = month_spent
+        #: 此刻是否处于供应商高峰时段。Pre-check 的估算是"现在要花多少"，
+        #: 所以必须和计费侧（`Router._is_peak_now`）用同一个判断 ——
+        #: 由组合根（`build_cost_controller`）从配置时区算好传进来。
+        self.peak_now = bool(peak_now)
         self.usage = RunUsage()
         self._clock = clock or time.monotonic
         #: Run 的开始时刻；None 表示尚未开始计时
@@ -263,7 +277,9 @@ class CostController:
                 ),
             )
 
-        estimate = estimate_run_cost(normalized, config, planned_calls=planned_calls)
+        estimate = estimate_run_cost(
+            normalized, config, planned_calls=planned_calls, peak=self.peak_now
+        )
         cost_with_margin = estimate.estimated_cost_with_margin
 
         if cost_with_margin > self.policy.run_max_cost:

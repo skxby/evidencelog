@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -423,3 +424,147 @@ def test_process_crash_ignores_ordinary_traffic():
     assert ProcessCrash().analyze(
         [{"message": "service started normally", "proc": "systemd", "event_id": 1}]
     ) == []
+
+
+# ============================================================
+# 回归（2026-09-24 真机核验）：runbook 必须认 analyzer 实际命中的那个词
+# ============================================================
+
+
+def test_runbook_matches_the_keyword_the_analyzer_actually_hit():
+    """真机核验：runbook 一条都挂不上 —— 命中可能来自**进程名**。
+
+    `CrashReporterSupportHelper` 这类崩溃上报进程，命中的是 `crash`，
+    而 `rb_crash_001` 当时只认 segfault / segmentation fault / core dumped / panic。
+    做法：关键词表对齐，并且把 analyzer 实际命中的词一起参与匹配。
+    """
+    from app.analysis.pipeline import attach_runbooks
+    from app.domains.wiring import build_default_registry
+
+    domain = build_default_registry().load("computer_monitoring")
+    real_message = (
+        "进程异常迹象（进程名命中 “crash”）：Internal name did not resolve to internal address!"
+    )
+
+    # 只给消息（真机上的原始形态）→ 现在的关键词表也能命中
+    assert domain.find_runbook_for("ProcessCrash", real_message).id == "rb_crash_001"
+
+    anomalies = [
+        {
+            "type": "ProcessCrash",
+            "severity": "high",
+            "message": real_message,
+            "event_ids": [1],
+            "detail": {"pattern": "crash", "matched_in": "进程名"},
+        }
+    ]
+    assert attach_runbooks(anomalies, domain=domain) == 1
+    assert anomalies[0]["runbook"]["id"] == "rb_crash_001"
+    assert anomalies[0]["runbook"]["steps"], "runbook 要带上处置步骤，页面才有东西可展示"
+
+
+def test_runbook_does_not_match_a_different_analyzer():
+    """关键词对齐不能放宽成"谁来都挂"：analyzer 名必须一致。"""
+    from app.domains.wiring import build_default_registry
+
+    domain = build_default_registry().load("computer_monitoring")
+    assert domain.find_runbook_for("DiskFull", "进程异常迹象（命中 “crash”）") is None
+
+
+# ============================================================
+# 回归（2026-09-24 真机核验）：坏的 staging 不能带走已确认知识
+# ============================================================
+
+
+def test_broken_staging_does_not_disable_confirmed_knowledge(work_tmp):
+    """staging 是模型写的：它坏掉只该让候选失效。
+
+    真机核验：模型自造 `kind=new_pattern` → `load_staging` 抛
+    `KnowledgeFormatError` → 整个 `knowledge()` 失败 → `confirmed_knowledge=0`，
+    知识闭环断在最后一步（确认过的知识明明在 confirmed/ 里却读不到）。
+    """
+    from app.domains.computer_monitoring.knowledge import load_all
+
+    base = work_tmp / "knowledge" / "computer_monitoring"
+    (base / "confirmed").mkdir(parents=True, exist_ok=True)
+    (base / "staging").mkdir(parents=True, exist_ok=True)
+    (base / "confirmed" / "ok.yaml").write_text(
+        "- id: k_ok\n"
+        "  kind: error_pattern\n"
+        "  title: 人工确认过的模式\n"
+        "  evidence: {run_id: '1'}\n"
+        "  confidence: 0.9\n"
+        "  status: confirmed\n",
+        encoding="utf-8",
+    )
+    (base / "staging" / "candidates.yaml").write_text(
+        "- id: cand_bad\n  kind: new_pattern\n  title: 模型自造的词\n", encoding="utf-8"
+    )
+
+    domain_dir = Path(__file__).resolve().parents[2] / "app" / "domains" / "computer_monitoring"
+    loaded = load_all(domain_dir, data_dir=work_tmp, domain_id="computer_monitoring")
+
+    assert [e.id for e in loaded["confirmed"] if e.id == "k_ok"] == ["k_ok"], (
+        "staging 坏了，已确认的知识也跟着没了"
+    )
+    assert loaded["staging"] == [], "坏掉的 staging 应当被跳过（并留下告警日志）"
+
+
+def test_broken_runtime_confirmed_file_does_not_disable_the_others(work_tmp):
+    """同一条原则用在 confirmed 上：**代码资产严格、运行时数据容错**。
+
+    seed（仓库内）坏了要当场炸 —— 那是代码 bug；运行时 confirmed 在数据卷里，
+    可能是旧版本或手工编辑写坏的，跳过它并指名告警，其余知识照常生效。
+    """
+    from app.domains.computer_monitoring.knowledge import load_all
+
+    base = work_tmp / "knowledge" / "computer_monitoring"
+    (base / "confirmed").mkdir(parents=True, exist_ok=True)
+    (base / "confirmed" / "good.yaml").write_text(
+        "- id: k_good\n"
+        "  kind: error_pattern\n"
+        "  title: 好条目\n"
+        "  evidence: {run_id: '1'}\n"
+        "  confidence: 0.9\n"
+        "  status: confirmed\n",
+        encoding="utf-8",
+    )
+    (base / "confirmed" / "bad.yaml").write_text(
+        "- id: k_bad\n  kind: new_pattern\n  title: 坏条目\n", encoding="utf-8"
+    )
+
+    domain_dir = Path(__file__).resolve().parents[2] / "app" / "domains" / "computer_monitoring"
+    loaded = load_all(domain_dir, data_dir=work_tmp, domain_id="computer_monitoring")
+    assert [e.id for e in loaded["confirmed"] if e.id == "k_good"] == ["k_good"]
+    assert loaded["staging"] == []
+
+
+def test_bad_entry_does_not_take_down_its_neighbours_in_the_same_file(work_tmp):
+    """同一个文件里：坏条目被跳过，好条目照常生效（逐条容错）。
+
+    真机核验（2026-09-24）：确认后的知识写进 `runtime_confirmed.yaml`，
+    同文件里还有一条模型自造的 `kind=new_pattern` —— 整份文件抛错，
+    人工确认的那条也一起读不回来。
+    """
+    from app.domains.computer_monitoring.knowledge import load_all
+
+    base = work_tmp / "knowledge" / "computer_monitoring"
+    (base / "confirmed").mkdir(parents=True, exist_ok=True)
+    (base / "confirmed" / "runtime_confirmed.yaml").write_text(
+        "- id: k_bad\n"
+        "  kind: new_pattern\n"
+        "  title: 模型自造的词\n"
+        "- id: k_confirmed_by_human\n"
+        "  kind: error_pattern\n"
+        "  title: 人工确认过的\n"
+        "  evidence: {run_id: '1'}\n"
+        "  confidence: 0.8\n"
+        "  status: confirmed\n",
+        encoding="utf-8",
+    )
+
+    domain_dir = Path(__file__).resolve().parents[2] / "app" / "domains" / "computer_monitoring"
+    loaded = load_all(domain_dir, data_dir=work_tmp, domain_id="computer_monitoring")
+    ids = [e.id for e in loaded["confirmed"]]
+    assert "k_confirmed_by_human" in ids, "同文件里的坏条目把好条目也带走了"
+    assert "k_bad" not in ids

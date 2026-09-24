@@ -144,12 +144,24 @@ class ComputerMonitoringDomain(DomainBase):
     # ---------- runbook 命中 ----------
 
     def find_runbook_for(
-        self, analyzer_name: str, message: str = "", metric_name: str | None = None
+        self,
+        analyzer_name: str,
+        message: str = "",
+        metric_name: str | None = None,
+        *,
+        matched_pattern: str | None = None,
     ) -> Runbook | None:
         """按 analyzer 命中对应 runbook（计划第 430 行验收项）。
 
         匹配顺序：先看 `applies.analyzer`；若有 `message_pattern` 要求同时命中；
         有 `metric_name` 也要求一致。多候选时取 id 最小者，保证**确定性**。
+
+        `matched_pattern` 是 analyzer **实际命中的那个关键词**（放在
+        `anomaly["detail"]["pattern"]` 里）。为什么要单独传它：命中可能来自
+        **进程名**而不是消息正文（`CrashReporterSupportHelper` 就是典型），
+        此时消息里根本没有那个词，只按 `message` 匹配会漏掉本该命中的 runbook ——
+        真机核验（2026-09-24）就是这么一条 runbook 都没挂上的：
+        analyzer 命中 `crash`，而 `rb_crash_001` 要求 segfault/panic/core dumped。
         """
         matches: list[Runbook] = []
         for book in self.runbooks():
@@ -160,8 +172,10 @@ class ComputerMonitoringDomain(DomainBase):
             if expected_metric is not None and expected_metric != metric_name:
                 continue
             pattern = applies.get("message_pattern")
-            if pattern is not None and not re.search(str(pattern), message, re.IGNORECASE):
-                continue
+            if pattern is not None:
+                haystack = f"{matched_pattern or ''} {message}"
+                if not re.search(str(pattern), haystack, re.IGNORECASE):
+                    continue
             matches.append(book)
 
         if not matches:
