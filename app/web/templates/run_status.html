@@ -64,6 +64,26 @@ function renderPhases(run) {
   });
 }
 
+function retryButton(label) {
+  /* 「重新分析」：按原 Run 的输入**新建**一个 Run（计划第 912 行）。
+     为什么不复用项目页的「发起分析」按钮：那要用户自己把时间窗再填一遍，
+     填得不一样就不是同一次分析了。服务端已把当时的请求存进 Run.input，
+     所以这里一键即可，且新 Run 会用 parent_run_id 指回原 Run。 */
+  return el('button', { class: 'primary', text: label, onclick: async (event) => {
+    const button = event.target;
+    button.disabled = true;
+    button.textContent = '正在创建…';
+    try {
+      const created = await API.post(`/api/runs/${RUN_ID}/retry`);
+      location.href = `/runs/${created.run_id}?project_id=${encodeURIComponent(PROJECT_ID)}`;
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = label;
+      showError(`重新分析失败：${error.message}`);
+    }
+  } });
+}
+
 function renderIncomplete(run) {
   const box = document.getElementById('incomplete-banner');
   const metadata = run.run_metadata || {};
@@ -78,6 +98,8 @@ function renderIncomplete(run) {
       box.appendChild(el('div', { class: 'small', text:
         `未执行的阶段：${metadata.skipped_phases.join('、')}` }));
     }
+    // 验收第 919 行：「不完整 / 失败」都要有重试入口 —— 原先只有失败态有
+    box.appendChild(el('div', { class: 'mt' }, [retryButton('重新分析（新建 Run）')]));
   } else {
     box.hidden = true;
   }
@@ -93,8 +115,10 @@ function renderFailed(run) {
       run.status === 'timeout' ? '任务超时（Worker 心跳丢失）' : '分析失败' }));
     box.appendChild(el('div', { class: 'small', text:
       `失败阶段：${run.current_phase || '未知'} · 原因：${run.error || '未提供'}` }));
-    box.appendChild(el('div', { class: 'mt' }, [
-      el('a', { href: `/projects/${PROJECT_ID}`, text: '← 回到项目，重新发起分析（会新建一个 Run）' }),
+    box.appendChild(el('div', { class: 'row mt' }, [
+      retryButton('重新分析（新建 Run）'),
+      el('a', { class: 'small', href: `/projects/${PROJECT_ID}`,
+        text: '或回项目页调整时间窗后重新发起 →' }),
     ]));
   } else {
     box.hidden = true;

@@ -101,12 +101,17 @@ class RunOutcome:
 
 
 def create_run(
-    run_repository: Any, request: RunRequest
+    run_repository: Any, request: RunRequest, *, parent_run_id: int | None = None
 ) -> tuple[int, str, bool]:
     """创建 Run 并**立即返回** `(run_id, status, reused)`（计划第 731 行验收）。
 
     相同幂等键且已有 `completed` → 返回那个 Run 并标 `reused=True`，
     **不重复执行、不重复计费**（计划第 703 行）。
+
+    `parent_run_id`：重试产生的新 Run 用它串起谱系（计划第 353、692 行
+    「failed 不可原地复活，只能新建 Run」）。这个参数一直在 model 与
+    `create_queued` 里备着，却**从来没有人传过** —— 谱系字段一直是空的，
+    正是"接口留好了、但没人接上"的那一类。
     """
     key = request.idempotency_key()
 
@@ -119,6 +124,7 @@ def create_run(
         source_id=request.source_id,
         idempotency_key=key,
         run_input=request.run_input,
+        parent_run_id=parent_run_id,
     )
     # 必须 flush 才能拿到自增 id —— 计划第 731 行要求"立即返回 run_id"，
     # 不 flush 的话 `run.id` 还是 None，返回值就是个空壳。

@@ -57,6 +57,8 @@ function renderRunHeader(run) {
     incomplete.appendChild(el('strong', { text: '⚠ 结果不完整' }));
     incomplete.appendChild(el('div', { class: 'small', text:
       `中断原因：${metadata.stop_reason || '未知'}。${metadata.note || ''}` }));
+    // 正在读这份不完整报告的人，正是最想重跑一次的人（验收第 919 行）
+    incomplete.appendChild(el('div', { class: 'mt' }, [retryButton()]));
   }
 
   const failed = document.getElementById('failed-banner');
@@ -66,7 +68,27 @@ function renderRunHeader(run) {
     failed.appendChild(el('strong', { text: '本 Run 未产出结论' }));
     failed.appendChild(el('div', { class: 'small', text:
       `失败阶段：${run.current_phase || '未知'} · 原因：${run.error || '未提供'}` }));
+    failed.appendChild(el('div', { class: 'mt' }, [retryButton()]));
   }
+}
+
+function retryButton() {
+  /* 「重新分析」：按原 Run 的输入新建一个 Run（计划第 912 行）。
+     服务端存了当时的请求快照，所以不必让用户回项目页重填时间窗。 */
+  return el('button', { class: 'primary', text: '重新分析（新建 Run）',
+    onclick: async (event) => {
+      const button = event.target;
+      button.disabled = true;
+      button.textContent = '正在创建…';
+      try {
+        const created = await API.post(`/api/runs/${RUN_ID}/retry`);
+        location.href = `/runs/${created.run_id}?project_id=${encodeURIComponent(PROJECT_ID)}`;
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = '重新分析（新建 Run）';
+        showError(`重新分析失败：${error.message}`);
+      }
+    } });
 }
 
 function renderInsight(insight, run) {

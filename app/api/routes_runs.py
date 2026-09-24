@@ -28,6 +28,7 @@ from app.api.schemas import (
 )
 from app.api.scoping import InsightScopeDep, RunScopeDep
 from app.config import get_settings
+from app.models import enums
 from app.models.insight import Insight
 from app.repositories.agent_run import AgentRunRepository
 from app.repositories.evidence import EvidenceRepository
@@ -195,6 +196,104 @@ def create_analysis_run(
         _dispatch(run_id, scope.project_id, request)
 
     return CreateRunResponse(run_id=run_id, status=run_status, reused=reused)
+
+
+#: 允许「重新分析」的终态。
+#:
+#: - `failed` / `timeout`：计划第 912 行明写要给入口；
+#: - `partial_success`：结果**不完整**，验收第 919 行要求"不完整 / 失败"都有重试入口；
+#: - `completed` **不给**：同样的输入再跑一遍只是重复计费（要重跑得换时间窗或过滤条件）；
+#: - `cancelled` 不给：那是用户主动取消，重试必须是一次新的显式操作，避免误触；
+#: - `queued` / `running` 不给：还在跑，重试会白花钱。
+RETRYABLE_RUN_STATES = frozenset(
+    {enums.AGENT_RUN_FAILED, enums.AGENT_RUN_TIMEOUT, enums.AGENT_RUN_PARTIAL_SUCCESS}
+)
+
+
+@router.post(
+    "/api/runs/{run_id}/retry",
+    response_model=CreateRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["runs"],
+)
+def retry_analysis_run(scope: RunScopeDep, session: SessionDep) -> CreateRunResponse:
+    """「重新分析」：按原 Run 的输入**新建**一个 Run（计划第 912 行）。
+
+    为什么要有个端点、而不是让页面把参数再填一遍：Run 创建时已经把当时的
+    请求原样存进了 `input`（计划第 328 行的 `input(jsonb)`）。让用户回项目页
+    重填一次时间窗，既容易填错（口径变了就不是同一次分析了），也违背
+    "失败结果要提供重试入口"的本意。
+
+    新 Run 用 `parent_run_id` 指向原 Run —— 计划第 353、692 行要求
+    「failed 不可原地复活，只能新建 Run，用 parent_run_id 串起谱系」。
+    """
+    run = scope.run
+    if run.status not in RETRYABLE_RUN_STATES:
+        raise HTTPException(
+            status_code=HTTP_422,
+            detail=(
+                f"Run {scope.run_id} 当前状态 {run.status} 不允许重新分析；"
+                f"只有 {sorted(RETRYABLE_RUN_STATES)} 可以"
+            ),
+        )
+
+    stored = dict(run.input or {})
+    if not stored:
+        # 不留空壳：没有原始输入就没法保证"重试的是同一件事"
+        raise HTTPException(
+            status_code=HTTP_422,
+            detail="这个 Run 没有记录原始输入，无法自动重新分析；请回项目页重新发起",
+        )
+
+    window = stored.get("time_range") or {}
+    try:
+        start = datetime.fromisoformat(str(window.get("start")))
+        end = datetime.fromisoformat(str(window.get("end")))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=HTTP_422,
+            detail=f"原 Run 的时间范围无法解析，不能自动重试：{window}",
+        ) from exc
+
+    request = RunRequest(
+        project_id=scope.project_id,
+        source_id=int(run.source_id or 0),
+        time_start=start,
+        time_end=end,
+        domain_id=_load_domain().domain_id,
+        domain_version=_load_domain().version,
+        filters=stored.get("filters") or {},
+        start_tier=stored.get("start_tier") or "L2",
+        run_input=stored,
+    )
+
+    runs = AgentRunRepository(session)
+    new_run_id, new_status, reused = create_run(runs, request, parent_run_id=scope.run_id)
+    session.flush()
+
+    from app.utils.observability import current_trace_id
+
+    trace_id = current_trace_id()
+    if trace_id and not reused:
+        row = runs.get(scope.project_id, new_run_id)
+        if row is not None:
+            row.run_metadata = {**(row.run_metadata or {}), "trace_id": trace_id}
+            row.run_metadata = {**row.run_metadata, "retry_of": scope.run_id}
+            session.flush()
+
+    if not reused:
+        # 与创建路径同样的顺序要求：先提交，再派发（否则 Worker 读到未提交的快照）
+        session.commit()
+        _logger.info(
+            "analysis_run_retried",
+            run_id=new_run_id,
+            retry_of=scope.run_id,
+            project_id=scope.project_id,
+            trace_id=trace_id,
+        )
+        _dispatch(new_run_id, scope.project_id, request)
+
+    return CreateRunResponse(run_id=new_run_id, status=new_status, reused=reused)
 
 
 @router.get("/api/runs/{run_id}", response_model=RunResponse, tags=["runs"])

@@ -175,6 +175,26 @@ def test_ui_exposes_all_four_knowledge_actions():
     assert "API.patch(" in knowledge, "编辑标题（PATCH）没有界面入口"
 
 
+def test_incomplete_and_failed_states_expose_a_retry_entry():
+    r"""验收第 919 行：不完整 / 失败结果都要有显著提示**与重试入口**。
+
+    实测原状态：失败态只有一个「回项目页，重新发起分析」的链接（用户得把
+    时间窗重填一遍，填得不一样就不是同一次分析了），而 `partial_success`
+    连入口都没有 —— 它恰恰是"结果不完整、最该重跑"的那一档。
+
+    现在两处都直接调 `POST /api/runs/{id}/retry`：服务端按原 Run 的
+    `input` 快照新建一个 Run，并用 `parent_run_id` 串起谱系。
+    """
+    status = (WEB_DIR / "templates" / "run_status.html").read_text(encoding="utf-8")
+    report = (WEB_DIR / "templates" / "report.html").read_text(encoding="utf-8")
+
+    for name, text in (("run_status.html", status), ("report.html", report)):
+        assert "/retry" in text, f"{name} 没有「重新分析」入口"
+        assert "partial_success" in text, f"{name} 未处理不完整态"
+        assert "'failed'" in text or '"failed"' in text, f"{name} 未处理失败态"
+        assert "不完整" in text, f"{name} 没有显著标注「结果不完整」"
+
+
 def test_write_endpoints_are_either_used_by_the_ui_or_documented(routes):
     """每个写接口要么有界面入口，要么在这里写明"为什么不需要"。
 

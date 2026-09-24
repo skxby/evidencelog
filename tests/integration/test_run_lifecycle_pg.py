@@ -845,3 +845,125 @@ def test_persistence_failure_ends_the_run_as_failed_not_queued(session, ctx, wor
     finally:
         fresh.close()
     assert tokens_input == 10 and float(cost) > 0
+
+
+# ============================================================
+# 回归：失败 / 不完整必须能「重新分析」（计划第 912 行、验收第 919 行）
+# ============================================================
+
+
+def test_retry_creates_a_new_run_with_lineage(session, ctx):
+    """「重新分析」要新建 Run 并用 parent_run_id 串起谱系。
+
+    计划第 692 行写的是「failed 不可原地复活，只能新建 Run」，
+    第 353 行说「重试产生新 Run，用 parent_run_id 串起谱系」——
+    字段和 `create_queued(parent_run_id=...)` 参数早就备好了，
+    但**从来没有人传过**：谱系一直是空的，重试入口也只有一句
+    "回项目页自己再点一次"（还得把时间窗重填一遍，填不一样就不是同一次分析了）。
+    """
+    from unittest.mock import patch
+
+    from app.api.routes_runs import retry_analysis_run
+    from app.api.scoping import RunScope
+
+    project, source, runs = ctx
+    original_id, _, _ = create_run(runs, _request(project, source))
+    session.flush()
+    # 让它进入一个"允许重试"的终态
+    runs.apply_status(project.id, original_id, target=enums.AGENT_RUN_RUNNING)
+    runs.apply_status(
+        project.id, original_id, target=enums.AGENT_RUN_FAILED, error="模型不可达"
+    )
+    session.flush()
+
+    original = runs.get(project.id, original_id)
+    original.input = {
+        "data_source_id": int(source.id),
+        "time_range": {"start": T0.isoformat(), "end": (T0 + timedelta(hours=1)).isoformat()},
+        "start_tier": "L2",
+    }
+    session.flush()
+
+    with patch("app.api.routes_runs._dispatch"):  # 不真的入队（测试里没有 broker）
+        response = retry_analysis_run(
+            scope=RunScope(run=original, project_id=project.id), session=session
+        )
+
+    assert response.reused is False, "重试必须是新 Run，不能把原 Run 复用回去"
+    assert response.run_id != original_id
+    assert response.status == enums.AGENT_RUN_QUEUED
+
+    session.expire_all()
+    fresh_run = runs.get(project.id, response.run_id)
+    assert int(fresh_run.parent_run_id) == original_id, (
+        f"新 Run 的 parent_run_id 应指向原 Run {original_id}，实际 {fresh_run.parent_run_id}"
+    )
+    # 输入必须原样带过去：换了时间窗就不是同一次分析了
+    assert fresh_run.input["time_range"]["start"] == T0.isoformat()
+    assert int(fresh_run.source_id) == int(source.id)
+
+
+def test_retry_refuses_states_that_would_waste_money(session, ctx):
+    """completed / running / queued 一律拒绝重试，并说明为什么。
+
+    `completed` 再跑一遍就是重复计费；`running`/`queued` 还在跑，
+    重试等于同一件事花钱做两次。拒绝时必须**说清原因**（红线 4）。
+    """
+    from fastapi import HTTPException
+
+    from app.api.routes_runs import retry_analysis_run
+    from app.api.scoping import RunScope
+
+    project, source, runs = ctx
+
+    for status_target, label in (
+        (None, "queued"),
+        (enums.AGENT_RUN_RUNNING, "running"),
+    ):
+        run_id, _, _ = create_run(
+            runs, _request(project, source, filters={"case": label})
+        )
+        session.flush()
+        if status_target:
+            runs.apply_status(project.id, run_id, target=status_target)
+        session.flush()
+        run = runs.get(project.id, run_id)
+        run.input = {
+            "time_range": {"start": T0.isoformat(), "end": (T0 + timedelta(hours=1)).isoformat()}
+        }
+        session.flush()
+
+        with pytest.raises(HTTPException) as excinfo:
+            retry_analysis_run(
+                scope=RunScope(run=run, project_id=project.id), session=session
+            )
+        assert excinfo.value.status_code == 422
+        assert label in str(excinfo.value.detail) or "不允许" in str(excinfo.value.detail)
+
+
+def test_retry_refuses_when_original_input_was_not_recorded(session, ctx):
+    """没有原始输入时**明确拒绝**，而不是"用当前时间凑一个"。
+
+    凑出来的时间窗和原来那次不是一回事，跑完还会以"重试成功"的面目出现 ——
+    这正是红线 4 要禁止的含糊。
+    """
+    from fastapi import HTTPException
+
+    from app.api.routes_runs import retry_analysis_run
+    from app.api.scoping import RunScope
+
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    session.flush()
+    runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_RUNNING)
+    runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_FAILED, error="boom")
+    session.flush()
+
+    run = runs.get(project.id, run_id)
+    run.input = None
+    session.flush()
+
+    with pytest.raises(HTTPException) as excinfo:
+        retry_analysis_run(scope=RunScope(run=run, project_id=project.id), session=session)
+    assert excinfo.value.status_code == 422
+    assert "原始输入" in str(excinfo.value.detail)
