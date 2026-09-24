@@ -89,7 +89,9 @@ async def upload_log(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
 
-    session.flush()
+    # 上传也显式提交：响应"已入库 N 条"之后，紧接着的分析必须能读到它们。
+    # 不提交的话，调用方拿到 200 后立刻发起分析，可能读到空集合。
+    session.commit()
     return UploadResponse(**result.as_dict())
 
 
@@ -157,6 +159,16 @@ def create_analysis_run(
             session.flush()
 
     if not reused:
+        # **必须先提交，再派发。**
+        #
+        # 派发只是往 Redis 放一条消息；worker 可能在几毫秒内取走它，并用**另一个
+        # 连接**读数据。若此时本请求的事务还没提交，worker 读到的是提交前的快照：
+        # 它会看到 0 条事件 -> 判定 L0（无异常）-> 产出一份「已完成、零结论」的报告。
+        # 而 API 侧一切正常、Run 状态也是 completed，从外面完全看不出问题。
+        #
+        # 2026-09-23 真机复现：本地 Redis + 单进程 worker 下必然踩中
+        # （Run 元数据 context_tokens=0、model_attempts=[]，而库里其实有 16 条事件）。
+        session.commit()
         _dispatch(run_id, scope.project_id, request)
 
     return CreateRunResponse(run_id=run_id, status=run_status, reused=reused)

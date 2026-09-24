@@ -620,3 +620,70 @@ def test_confirm_with_another_users_project_is_404(client: TestClient):
         headers=intruder,
     )
     assert response.status_code == 404
+
+# ============================================================
+# 回归：派发任务前必须先提交（否则 worker 读到空数据）
+# ============================================================
+
+
+def test_run_creation_commits_before_dispatching(client: TestClient):
+    """派发 Celery 任务前必须已提交，否则 worker 会读到一个空的世界。
+
+    真实故障（2026-09-23 真机复现）：`POST /analysis-runs` 在请求事务提交
+    **之前**就把任务放进 Redis；worker 用另一个连接读，看到 0 条事件 →
+    判定 L0（无异常）→ 产出一份"已完成、零结论"的报告。
+    API 侧一切正常、Run 状态是 completed，从外面完全看不出问题
+    （Run 元数据里 context_tokens=0、model_attempts=[]，而库里其实有 16 条事件）。
+
+    本测试用「在 _dispatch 被调用的那一刻，从**独立会话**查事件」来复现该竞态：
+    若创建 Run 之前没有提交，事件对独立会话不可见，断言失败。
+    """
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+
+    content = (
+        b"Jun 14 15:16:01 combo kernel: Out of memory: Kill process 1234 (java)\n"
+        b"Jun 14 15:16:02 combo kernel: segfault at 0 ip 00007f\n"
+    )
+    upload = client.post(
+        f"/api/projects/{project_id}/upload",
+        files={"file": ("syslog.txt", content, "text/plain")},
+        data={"fmt": "txt"},
+        headers=headers,
+    )
+    assert upload.status_code == 200, upload.text
+    assert upload.json()["events_persisted"] == 2
+    source_id = upload.json()["data_source_id"]
+
+    observed: dict[str, int] = {}
+
+    def spy_dispatch(run_id: int, dispatched_project_id: int, request: object) -> None:
+        # 模拟 worker：用**另一个会话**读数据。
+        # 此刻若创建 Run 的事务尚未提交，这里会读到 0。
+        with SessionLocal() as probe:
+            observed["events"] = int(
+                probe.execute(
+                    text("SELECT count(*) FROM events WHERE project_id = :p"),
+                    {"p": dispatched_project_id},
+                ).scalar_one()
+            )
+            observed["run_visible"] = int(
+                probe.execute(
+                    text("SELECT count(*) FROM agent_runs WHERE id = :i"), {"i": run_id}
+                ).scalar_one()
+            )
+
+    with patch("app.api.routes_runs._dispatch", side_effect=spy_dispatch) as dispatch:
+        response = client.post(
+            f"/api/projects/{project_id}/analysis-runs",
+            json={"data_source_id": source_id},
+            headers=headers,
+        )
+
+    assert response.status_code == 202, response.text
+    assert dispatch.call_count == 1
+    assert observed["run_visible"] == 1, "派发时 Run 对独立会话不可见 —— 提交发生在派发之后"
+    assert observed["events"] == 2, (
+        f"派发时事件对独立会话不可见（读到 {observed['events']} 条）—— "
+        "worker 会因此把有崩溃的日志判成 L0，产出零结论的『已完成』报告"
+    )
