@@ -47,6 +47,9 @@ uploads/*
 !uploads/.gitkeep
 # 知识库运行时数据（confirmed/staging）走数据卷，不进代码仓库
 data/
+# 全新 clone 交付验证会在工作区里放一份**完整副本**，里面还有按 README 复制进去的 .env：
+# 脚本正常跑完会删掉它，一旦中断留下，这份副本绝不能进版本库（否则等于泄一次密钥）
+.fresh-clone/
 
 # --- 工具 ---
 .idea/
