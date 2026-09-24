@@ -39,7 +39,14 @@ WEB_FILES = ("nginx_json_access.log", "nginx_plain.log", "nginxplus_status_json.
 def _lines(name: str) -> list[str]:
     path = LOGS_DIR / name
     if not path.is_file():
-        pytest.skip(f"缺少样本 {name}")
+        # 跳过语必须说清"没验证到什么"，否则报告里 skip 与 pass 长得几乎一样
+        # （本项目自己在 Golden Set 里就写过这条教训）。
+        # 现实风险：`logs/` 未纳入版本库，**全新 clone 后这里会整批跳过** ——
+        # 包括"解析率 ≥ 98%"这条验收基线本身，共 7 个用例。
+        pytest.skip(
+            f"缺少真实日志样本 {name}（logs/ 未纳入版本库）："
+            f"该文件的真实解析率基线**未被验证**，不等同于通过"
+        )
     return [ln for ln in path.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
 
 
