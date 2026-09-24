@@ -26,6 +26,7 @@ def build_cost_controller(
     settings: Any = None,
     policy_store: Any = None,
     clock: Any = None,
+    session: Any = None,
 ) -> CostController | None:
     """给某个 Project 建一个成本控制器；读不到型号配置时返回 `None`。
 
@@ -56,17 +57,60 @@ def build_cost_controller(
 
     total: float | None = None
     used = 0.0
+    month_spent = 0.0
     if project is not None:
         raw_total = float(project.budget_total or 0.0)
         total = raw_total if raw_total > 0 else None
         used = float(project.budget_used or 0.0)
+
+        # 本月已花：月度预算的 Pre-check 要用（计划第 644 行）。
+        # 需要 session 才能查；拿不到就按 0 处理（**不假装超预算**：
+        # 宁可少一道闸门，也不能因为查不到数据就把创建全拒了）。
+        if session is not None:
+            month_spent = _month_spent(session, int(project.id), settings=settings)
 
     return CostController(
         policy,
         tier_configs=tier_configs,
         project_budget_total=total,
         project_budget_used=used,
+        month_spent=month_spent,
         clock=clock,
+    )
+
+
+def month_start(*, settings: Any = None, now: Any = None) -> Any:
+    """本月起点（按配置时区的自然月，返回 UTC datetime）。
+
+    为什么按本地时区切月：预算是人按"这个月花了多少"理解的，
+    用 UTC 切会让月初/月末各错 8 小时。
+    """
+    from datetime import datetime, timezone
+
+    from app.utils.timestamps import get_zone
+
+    settings = settings or _settings_or_none()
+    tz_name = getattr(settings, "default_timezone", "Asia/Shanghai") or "Asia/Shanghai"
+    local_now = (now or datetime.now(timezone.utc)).astimezone(get_zone(tz_name))
+    return local_now.replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    ).astimezone(timezone.utc)
+
+
+def _settings_or_none() -> Any:
+    try:
+        from app.config import get_settings
+
+        return get_settings()
+    except Exception:  # noqa: BLE001 - 配置不可读时退回默认时区
+        return None
+
+
+def _month_spent(session: Any, project_id: int, *, settings: Any = None) -> float:
+    from app.repositories.agent_run import AgentRunRepository
+
+    return AgentRunRepository(session).cost_sum_since(
+        project_id, month_start(settings=settings)
     )
 
 

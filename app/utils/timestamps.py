@@ -62,6 +62,33 @@ def to_utc(dt: datetime, *, default_timezone: str = "Asia/Shanghai") -> datetime
     return dt.astimezone(timezone.utc)
 
 
+#: 供应商的高峰时段（本地时区的 weekday + [起, 止) 小时）。
+#: 默认对应 DeepSeek 的定价口径：工作日 9:00–12:00、14:00–18:00（北京时间）
+#: —— 这正是 `app/config.py` 里 `model_peak_price_multiplier` 注释写明的窗口。
+#: 放在这里而不是写死在计价函数里：窗口是**策略**，换供应商就该只改这一处。
+DEFAULT_PEAK_WINDOWS: tuple[tuple[int, int], ...] = ((9, 12), (14, 18))
+
+
+def is_peak_time(
+    moment: datetime,
+    *,
+    default_timezone: str = "Asia/Shanghai",
+    windows: tuple[tuple[int, int], ...] = DEFAULT_PEAK_WINDOWS,
+) -> bool:
+    """`moment` 是否落在高峰时段（按本地时区的工作日与小时区间判断）。
+
+    为什么要转本地时区：供应商的峰谷是按它自己的时区定义的，
+    拿 UTC 直接比小时会把 9 点看成凌晨 1 点，峰谷判断整个错位 ——
+    而算错的方向可能是**少算钱**（预算闸门就跟着失效）。
+    """
+    local = to_utc(moment, default_timezone=default_timezone).astimezone(
+        get_zone(default_timezone)
+    )
+    if local.weekday() >= 5:  # 周六 / 周日不算高峰
+        return False
+    return any(start <= local.hour < end for start, end in windows)
+
+
 def parse_timestamp(
     raw: str | datetime | None,
     *,

@@ -170,6 +170,27 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
             reclaimed.append(int(run.id))
         return reclaimed
 
+    # ---------- 成本汇总 ----------
+
+    def cost_sum_since(self, project_id: int, since: datetime) -> float:
+        """该项目自 `since` 起的累计实际花费（元）。
+
+        用于月度预算的 Pre-check（计划第 644 行「月度预算或 Run 预算不足 → 拒绝创建」）。
+        以 `started_at` 为准（冻结表里 AgentRun 没有 created_at）：Run 的钱是从
+        开始执行那一刻花的；尚未开始的 Run（`started_at` 为空）花费恒为 0，被自然排除。
+        `cost_actual` 是 `Numeric`，故这里显式转 float，别把 Decimal 漏进业务层。
+        """
+        from sqlalchemy import func
+
+        total = self.session.execute(
+            select(func.coalesce(func.sum(AgentRun.cost_actual), 0)).where(
+                AgentRun.project_id == project_id,
+                AgentRun.started_at.is_not(None),
+                AgentRun.started_at >= since,
+            )
+        ).scalar_one()
+        return float(total or 0.0)
+
     # ---------- 状态写入 ----------
 
     def apply_status(

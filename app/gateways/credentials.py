@@ -4,12 +4,22 @@
 
 解析顺序：
 1. 显式传入的值（测试用）；
-2. 环境变量（`.env` 由 `pydantic-settings` 载入 `Settings`）；
-3. DSH 的凭据文件 `$DSH_HOME/.credentials.yaml`（或 `~/.dsh/.credentials.yaml`）。
+2. `Settings` —— 它同时覆盖**真实环境变量**与项目 `.env`
+   （pydantic-settings 的优先级是 环境变量 > .env > 默认值）；
+3. `DEEPSEEK_API_KEY` 这个别名（走 os.environ，Settings 里没有这个字段）；
+4. DSH 的凭据文件 `$DSH_HOME/.credentials.yaml`。
 
-第 3 条是为了复用「DSH 里已经配好的 Key」，避免同一把 Key 在两处各存一份。
+第 4 条是为了复用「DSH 里已经配好的 Key」，避免同一把 Key 在两处各存一份。
 找不到时抛 `ConfigurationError` 并说明去哪里配 —— 启动即失败，而不是
 等第一次调用才报一个含糊的错误。
+
+**为什么必须先读 `Settings`**：这里曾经只读 `os.environ`，而
+`pydantic-settings` 载入 `.env` 时**不会**把值写进 `os.environ`。
+后果是：README 让用户"填 `.env` 里的 MODEL_PROVIDER_API_KEY"，
+而只在宿主机直跑时根本读不到它 —— 只有在 Docker 里才碰巧能用，
+因为 compose 的 `env_file:` 会把 `.env` 变成**真正的环境变量**。
+实测：把 `DSH_HOME` 指到空目录后，`.env` 里明明有 Key，
+`resolve_api_key()` 依旧报"找不到 API Key"。
 """
 
 from __future__ import annotations
@@ -52,15 +62,28 @@ def _read_credentials_file(path: Path) -> dict[str, str]:
 
 
 def resolve_api_key(explicit: str | None = None) -> str:
-    """按 显式 > 环境变量 > DSH 凭据文件 的顺序解析 API Key。"""
+    """按 显式 > Settings(环境变量/.env) > 别名环境变量 > DSH 凭据文件 的顺序解析 API Key。"""
     if explicit:
         return explicit
 
+    # ① Settings：一条就覆盖了"真实环境变量"与"项目 .env"两种来源。
+    #    不读它的话，宿主机上"只填了 .env"的用户会被判成没配 Key。
+    try:
+        from app.config import get_settings
+
+        from_settings = (get_settings().model_provider_api_key or "").strip()
+    except Exception:  # noqa: BLE001 - 配置读取失败不该让凭据解析直接崩
+        from_settings = ""
+    if from_settings:
+        return from_settings
+
+    # ② 别名（如 DEEPSEEK_API_KEY）：Settings 里没有这个字段，只能看环境变量
     for name in API_KEY_ENV_NAMES:
         value = os.environ.get(name)
         if value:
             return value.strip()
 
+    # ③ DSH 凭据文件
     path = dsh_credentials_path()
     refs = _read_credentials_file(path)
     for name in API_KEY_ENV_NAMES:

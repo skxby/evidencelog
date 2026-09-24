@@ -217,3 +217,63 @@ def test_ci_has_no_real_secrets():
 )
 def test_delivery_files_exist(name: str):
     assert (PROJECT_ROOT / name).is_file(), f"缺少交付文件 {name}"
+
+
+# ============================================================
+# 凭据解析：README 让用户填 .env，那就必须真的能读到
+# ============================================================
+
+
+def test_api_key_is_readable_from_settings(monkeypatch):
+    """`MODEL_PROVIDER_API_KEY` 写在 `.env` 里必须能被解析到。
+
+    这里曾经只读 `os.environ`，而 **pydantic-settings 载入 `.env` 时不会把值
+    写进 `os.environ`**。后果很具体：按 README 填好 `.env`、在宿主机直跑，
+    会被判成"没配 Key"；只有在 Docker 里才碰巧能用，因为 compose 的
+    `env_file:` 会把 `.env` 变成真正的环境变量。
+
+    实测复现方式：把 `DSH_HOME` 指到一个空目录（切断 DSH 凭据文件那条路）。
+    """
+    from app.gateways import credentials
+
+    class _FakeSettings:
+        model_provider_api_key = "sk-from-dotenv-1234567890"
+
+    monkeypatch.delenv("MODEL_PROVIDER_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setattr("app.config.get_settings", lambda: _FakeSettings())
+
+    assert credentials.resolve_api_key() == "sk-from-dotenv-1234567890"
+
+
+def test_api_key_falls_back_to_env_alias_then_dsh_file(monkeypatch, work_tmp):
+    """Settings 没值时按「别名环境变量 → DSH 凭据文件」继续找。"""
+    from app.gateways import credentials
+
+    class _EmptySettings:
+        model_provider_api_key = ""
+
+    monkeypatch.setattr("app.config.get_settings", lambda: _EmptySettings())
+    monkeypatch.delenv("MODEL_PROVIDER_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-alias-abcdefghijklmn")
+    assert credentials.resolve_api_key() == "sk-alias-abcdefghijklmn"
+
+    # 连别名也没有 → 落到 DSH 凭据文件
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    dsh_home = work_tmp / "dsh"
+    dsh_home.mkdir(parents=True, exist_ok=True)
+    (dsh_home / ".credentials.yaml").write_text(
+        "refs:\n  MODEL_PROVIDER_API_KEY: sk-from-dsh-file-12345\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    assert credentials.resolve_api_key() == "sk-from-dsh-file-12345"
+
+
+def test_explicit_key_wins_over_everything(monkeypatch):
+    from app.gateways import credentials
+
+    class _FakeSettings:
+        model_provider_api_key = "sk-from-dotenv-1234567890"
+
+    monkeypatch.setattr("app.config.get_settings", lambda: _FakeSettings())
+    assert credentials.resolve_api_key("sk-explicit") == "sk-explicit"

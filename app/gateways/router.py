@@ -10,6 +10,7 @@ L0 是「代码 / 规则，不调用模型」（计划第 599 行），故 Route
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from app.gateways.base import (
@@ -39,9 +40,11 @@ def read_tier_configs(settings: Any) -> dict[str, TierConfig]:
     （那时错误会伪装成"模型不可用"，让人往网络方向排查）。
     """
     configs: dict[str, TierConfig] = {}
-    # 缓存命中价是**全局**一项（.env 里只有 MODEL_CACHE_HIT_INPUT_PRICE_PER_1M，
-    # 没有分等级的版本），故三个等级共用同一个值。
+    # 缓存命中价与峰谷倍数都是**全局**一项（.env 里只有
+    # MODEL_CACHE_HIT_INPUT_PRICE_PER_1M 与 MODEL_PEAK_PRICE_MULTIPLIER，
+    # 没有分等级的版本），故三个等级共用。
     cache_hit_price = float(_tier_field(settings, "model_cache_hit_input_price_per_1m") or 0.0)
+    peak_multiplier = float(_tier_field(settings, "model_peak_price_multiplier") or 1.0)
     for tier in MODEL_TIERS:
         lowered = tier.lower()
         model = _tier_field(settings, f"model_{lowered}") or ""
@@ -66,6 +69,7 @@ def read_tier_configs(settings: Any) -> dict[str, TierConfig]:
             price_input_per_1m=price_in,
             price_output_per_1m=price_out,
             price_cache_hit_input_per_1m=cache_hit_price,
+            peak_price_multiplier=peak_multiplier,
         )
     return configs
 
@@ -129,10 +133,27 @@ class Router:
         tokens_output: int,
         *,
         cached_tokens: int = 0,
+        peak: bool | None = None,
     ) -> float:
-        """按等级单价估算成本（元）。阶段 07 的 Pre-check 会用它。"""
+        """按等级单价估算成本（元）。阶段 07 的 Pre-check 会用它。
+
+        `peak=None` 时按**当前时刻**判断峰谷；Pre-check 的估算是"现在要花多少"，
+        所以默认取当下是对的。显式传值用于测试与回放。
+        """
         return self.tier_config(tier).estimate_cost(
-            tokens_input, tokens_output, cached_tokens=cached_tokens
+            tokens_input,
+            tokens_output,
+            cached_tokens=cached_tokens,
+            peak=self._is_peak_now() if peak is None else peak,
+        )
+
+    def _is_peak_now(self) -> bool:
+        """现在是否处于供应商的高峰时段（窗口见 `is_peak_time`）。"""
+        from app.utils.timestamps import is_peak_time
+
+        return is_peak_time(
+            datetime.now(timezone.utc),
+            default_timezone=getattr(self.settings, "default_timezone", "Asia/Shanghai"),
         )
 
     # ---------- 调用 ----------
@@ -166,12 +187,14 @@ class Router:
         result.tier = target.tier
 
         config = self.tiers[target.tier]
-        # 命中缓存的输入 token 单独计价（见 TierConfig.estimate_cost 的说明）。
-        # 不传的话命中部分会按全额输入价计费，账单被高估。
+        # 命中缓存的输入 token 单独计价；高峰时段乘峰值倍数。
+        # 两个都不传的话账单会偏（缓存那侧偏高、峰谷那侧偏低），
+        # 而偏差会直接喂给预算闸门。
         result.cost = config.estimate_cost(
             result.tokens_input,
             result.tokens_output,
             cached_tokens=getattr(result, "cached_tokens", 0) or 0,
+            peak=self._is_peak_now(),
         )
 
         if record:

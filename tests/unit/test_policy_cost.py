@@ -480,3 +480,101 @@ def test_cached_tokens_larger_than_input_is_clamped():
     assert config.estimate_cost(1000, 0, cached_tokens=99999) == pytest.approx(
         1000 / 1_000_000 * 0.02
     )
+
+
+# ============================================================
+# 峰谷价（MODEL_PEAK_PRICE_MULTIPLIER 以前没人读）
+# ============================================================
+
+
+def test_peak_multiplier_applies_only_when_asked():
+    """配置里的单价是**闲时价**，高峰时段要乘倍数。
+
+    不乘的话账单被**低估**，而低估的方向更糟：预算是"钱够不够"的闸门，
+    低估会让它在该拦的时候不拦。这个倍数以前在 Settings 与 .env 里都有，
+    代码里却没人读。
+    """
+    off_peak_config = TierConfig("L1", "m", "off", 0.5, 2.0)  # 默认倍数 1.0
+    assert off_peak_config.estimate_cost(1000, 500, peak=True) == pytest.approx(
+        off_peak_config.estimate_cost(1000, 500)
+    )
+
+    peak_config = TierConfig("L1", "m", "off", 0.5, 2.0, peak_price_multiplier=2.0)
+    assert peak_config.estimate_cost(1000, 500, peak=True) == pytest.approx(
+        2 * peak_config.estimate_cost(1000, 500)
+    )
+
+
+def test_peak_window_uses_local_timezone_and_weekdays():
+    """峰谷窗口按**本地时区**的工作日判断。
+
+    拿 UTC 直接比小时会把北京时间 10 点看成凌晨 2 点，峰谷整个错位。
+    窗口取自 `app/config.py` 里 `model_peak_price_multiplier` 的注释：
+    工作日 9:00–12:00、14:00–18:00（北京时间）。
+    """
+    from datetime import datetime, timezone
+
+    from app.utils.timestamps import is_peak_time
+
+    # 北京时间 = UTC+8；2026-09-24 是周四，2026-09-26 是周六
+    assert is_peak_time(datetime(2026, 9, 24, 2, 0, tzinfo=timezone.utc)) is True  # 北京 10:00
+    assert is_peak_time(datetime(2026, 9, 24, 7, 0, tzinfo=timezone.utc)) is True  # 北京 15:00
+    assert is_peak_time(datetime(2026, 9, 24, 5, 0, tzinfo=timezone.utc)) is False  # 北京 13:00
+    assert is_peak_time(datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)) is False  # 北京 20:00
+    assert is_peak_time(datetime(2026, 9, 26, 2, 0, tzinfo=timezone.utc)) is False  # 周六
+
+
+# ============================================================
+# 月度预算（monthly_budget 以前没人读）
+# ============================================================
+
+
+def test_monthly_budget_refuses_when_the_month_is_used_up():
+    """计划第 644 行：「月度预算或 Run 预算不足 → 拒绝创建」。
+
+    `monthly_budget` 在 Settings 与 RunPolicy 里都声明了、README 也写成
+    "预算上限"，却从来没有任何地方比过它 —— 又一个"配置项是摆设"。
+    """
+    controller = CostController(
+        RunPolicy(monthly_budget=10.0), tier_configs=TIERS, month_spent=9.999
+    )
+    result = controller.pre_check("L3")
+
+    assert result.allowed is False
+    assert "月度预算" in (result.message or "")
+    assert result.reason == STOP_BUDGET_EXCEEDED
+
+
+def test_monthly_budget_leaves_room_when_not_exhausted():
+    controller = CostController(
+        RunPolicy(monthly_budget=10.0), tier_configs=TIERS, month_spent=1.0
+    )
+    assert controller.pre_check("L3").allowed is True
+
+
+def test_monthly_budget_zero_means_no_monthly_cap():
+    """0 表示"不设月度上限"，而不是"一分钱都不能花"。
+
+    默认值若是 0 就被当成硬上限，所有项目都会在月初第一条分析就发不起来 ——
+    那是把默认值当成了策略（与 `budget_total` 的 0 同一条道理）。
+    """
+    controller = CostController(
+        RunPolicy(monthly_budget=0.0), tier_configs=TIERS, month_spent=1000.0
+    )
+    assert controller.pre_check("L3").allowed is True
+
+
+def test_month_start_follows_configured_timezone():
+    """月度起点按配置时区的自然月切，而不是 UTC。"""
+    from datetime import datetime, timezone
+
+    from app.policy.wiring import month_start
+
+    class _Settings:
+        default_timezone = "Asia/Shanghai"
+
+    start = month_start(
+        settings=_Settings(), now=datetime(2026, 9, 23, 18, 0, tzinfo=timezone.utc)
+    )
+    # 北京 9/1 00:00 == UTC 8/31 16:00
+    assert start == datetime(2026, 8, 31, 16, 0, tzinfo=timezone.utc)

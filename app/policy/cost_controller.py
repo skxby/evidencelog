@@ -195,12 +195,14 @@ class CostController:
         tier_configs: dict[str, TierConfig],
         project_budget_total: float | None = None,
         project_budget_used: float = 0.0,
+        month_spent: float = 0.0,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.policy = policy
         self.tier_configs = tier_configs
         self.project_budget_total = project_budget_total
         self.project_budget_used = project_budget_used
+        self.month_spent = month_spent
         self.usage = RunUsage()
         self._clock = clock or time.monotonic
         #: Run 的开始时刻；None 表示尚未开始计时
@@ -285,6 +287,23 @@ class CostController:
                     message=(
                         f"项目剩余预算 ¥{remaining:.4f} 不足以覆盖预计成本 "
                         f"¥{cost_with_margin:.4f}"
+                    ),
+                    estimate=estimate,
+                )
+
+        # 月度预算（计划第 644 行「月度预算或 Run 预算不足 → 拒绝创建」）。
+        # 这一条此前完全没有实现：`monthly_budget` 在 Settings 与 RunPolicy 里
+        # 都声明了、README 也把它写成"预算上限"，但没有任何地方比过它。
+        if self.policy.monthly_budget > 0:
+            month_remaining = self.policy.monthly_budget - self.month_spent
+            if cost_with_margin > month_remaining:
+                return PreCheckResult(
+                    allowed=False,
+                    reason=STOP_BUDGET_EXCEEDED,
+                    message=(
+                        f"本月已花 ¥{self.month_spent:.4f}，月度预算 "
+                        f"¥{self.policy.monthly_budget:.4f} 剩余 ¥{month_remaining:.4f} "
+                        f"不足以覆盖预计成本 ¥{cost_with_margin:.4f}"
                     ),
                     estimate=estimate,
                 )

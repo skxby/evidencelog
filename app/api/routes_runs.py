@@ -152,7 +152,7 @@ def create_analysis_run(
     from app.policy.wiring import build_cost_controller
 
     project_row = session.get(Project, scope.project_id)
-    controller = build_cost_controller(project=project_row)
+    controller = build_cost_controller(project=project_row, session=session)
     if controller is not None:
         pre = controller.pre_check(payload.start_tier or "L2")
         if not pre.allowed:

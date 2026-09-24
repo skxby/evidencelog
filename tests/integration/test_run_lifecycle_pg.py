@@ -848,6 +848,56 @@ def test_persistence_failure_ends_the_run_as_failed_not_queued(session, ctx, wor
 
 
 # ============================================================
+# 回归：月度预算的取数（cost_sum_since）
+# ============================================================
+
+
+def test_cost_sum_since_only_counts_this_projects_runs_after_the_cutoff(session, ctx):
+    """月度预算的取数必须**按项目、按时间**过滤，且不把 Decimal 漏出去。
+
+    取错了方向会很糟：把别的项目的花费算进来 → 无辜项目被拒；
+    把本月之外的花费算进来 → 月度闸门永远不触发。
+    """
+    from datetime import datetime, timezone
+
+    from app.models.agent_run import AgentRun
+    from app.repositories.agent_run import AgentRunRepository
+
+    project, source, _runs = ctx
+    other_project = ProjectRepository(session).add(
+        Project(user_id=project.user_id, name="p08-other", budget_total=10, budget_used=0)
+    )
+    session.flush()
+
+    cutoff = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    rows = [
+        # 本项目、cutoff 之后：应计入
+        (project.id, datetime(2026, 9, 10, tzinfo=timezone.utc), 0.25),
+        # 本项目、cutoff 之前：不应计入
+        (project.id, datetime(2026, 8, 31, tzinfo=timezone.utc), 9.99),
+        # 别的项目、cutoff 之后：不应计入
+        (other_project.id, datetime(2026, 9, 11, tzinfo=timezone.utc), 5.0),
+        # 本项目、尚未开始：花费恒为 0，也不该被算进"本月已花"
+        (project.id, None, 3.0),
+    ]
+    for pid, started, cost in rows:
+        session.add(
+            AgentRun(
+                project_id=pid,
+                source_id=source.id,
+                status=enums.AGENT_RUN_COMPLETED,
+                started_at=started,
+                cost_actual=cost,
+            )
+        )
+    session.flush()
+
+    total = AgentRunRepository(session).cost_sum_since(project.id, cutoff)
+    assert isinstance(total, float), "Numeric 的 Decimal 不该漏进业务层"
+    assert total == pytest.approx(0.25), f"只应计入本项目 cutoff 之后的那一笔，实际 {total}"
+
+
+# ============================================================
 # 回归：Post-check 必须把花费累加回 Project.budget_used
 # ============================================================
 

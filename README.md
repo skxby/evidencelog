@@ -131,7 +131,8 @@ logagent-beat       Up
 | `MODEL_L*_REASONING` | `off` / `low` / `high` | 合法值只有 `off`/`low`/`high`/`max`；`medium` 是非法值 |
 | `MODEL_L*_PRICE_*_PER_1M` | `1` / `4` | 单价，**元 / 每百万 token**；用于成本核算 |
 | `MODEL_CACHE_HIT_INPUT_PRICE_PER_1M` | `0.02` | 缓存命中的输入单价（比输入价低一个数量级）。按命中 token 数单独计费，不配则按正常输入价 |
-| `MONTHLY_BUDGET` / `DEFAULT_RUN_MAX_COST` | `10` / `0.30` | 预算上限，货币单位统一为**人民币元** |
+| `MODEL_PEAK_PRICE_MULTIPLIER` | `2` | 高峰时段倍数（窗口＝工作日 9–12、14–18 点，按 `DEFAULT_TIMEZONE`）；单价按闲时价填，填 1 表示不区分峰谷 |
+| `MONTHLY_BUDGET` / `DEFAULT_RUN_MAX_COST` | `10` / `0.30` | 月度预算 / 单次 Run 上限，货币单位统一为**人民币元**；`0` 表示该项不设上限（单次为 `0` 则是"不许花钱"） |
 | `DATA_DIR` | `./data` | 运行时数据（知识库 confirmed/staging）；compose 里是 `/app/data`（卷） |
 | `DEFAULT_TIMEZONE` | `Asia/Shanghai` | 日志时间戳缺时区时按它解析，再转 UTC 存库 |
 
