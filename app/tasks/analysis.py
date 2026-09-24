@@ -269,17 +269,18 @@ def _execute(
             "evidence_count": 0,
         }
 
-        # 回填成本与 token（计划第 650–652 行的 Post-check）
-        if result is not None:
-            run.tokens_input = sum(
-                int(a.get("tokens_input") or 0) for a in result.model_attempts
-            )
-            run.tokens_output = sum(
-                int(a.get("tokens_output") or 0) for a in result.model_attempts
-            )
-            run.cost_actual = sum(
-                float(a.get("cost") or 0) for a in result.model_attempts
-            )
+        # 回填成本与 token（计划第 650–652 行的 Post-check）。
+        #
+        # 走 `controller.post_check()` 而不是在这里把 `model_attempts` 再累加一遍：
+        # 用量本来就在控制器里逐次记账（`PolicyGuardedRouter` 每次调用后
+        # `record_call`），这里再算一次等于**同一件事两份实现** ——
+        # 一份算错时另一份不会报错，只会给出两个不一样的数字。
+        # 控制器可能是 None（型号没配齐，走纯规则），那时没有花费可回填。
+        if result is not None and controller is not None:
+            usage = controller.post_check()
+            run.tokens_input = int(usage.get("tokens_input") or 0)
+            run.tokens_output = int(usage.get("tokens_output") or 0)
+            run.cost_actual = float(usage.get("cost") or 0.0)
 
         # 把产出条数与降级事实回填进 Run 元数据 —— 否则 Run 详情只会显示
         # "0 条结论、0 次模型调用"，而**真实发生的事**（结构化输出失败、

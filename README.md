@@ -231,6 +231,12 @@ RUN_LIVE_MODEL_TESTS=1 pytest tests/integration/test_gateway_live.py -v -s
 | `.dsh/settings_usage_audit.py` | 逐个确认 `.env`/Settings 里的配置项**真的被读过** | `python .dsh/settings_usage_audit.py` |
 | `.dsh/runbook_probe.py` | 重放真机事件，看 runbook 为什么没挂上 | `python .dsh/runbook_probe.py <project_id>` |
 | `.dsh/cancel_stale_probe.py` | 复现"取消慢一步"的机制（Worker 长事务的行锁） | `python .dsh/cancel_stale_probe.py <run_id>` |
+| `.dsh/history_probe.py` | 同项目再跑一次，看历史事故有没有真的注入 Context | `python .dsh/history_probe.py <project_id>` |
+| `.dsh/knowledge_loop_probe.py` | 知识闭环：候选 → 经接口确认 → 下次分析是否加载 | `python .dsh/knowledge_loop_probe.py <project_id>` |
+| `.dsh/edge_scenarios.py` | 边界场景：迁移回滚 / 模型不可用降级 / 假 event_id / 极小预算 partial / L1 样本 / 重试入口 | `python .dsh/edge_scenarios.py --migration`（其余模式见文件头） |
+| `.dsh/stub_provider.py` | 本地桩供应商（OpenAI 兼容）：造假 event_id、可控 token 用量，**零费用**验异常输入 | `python .dsh/stub_provider.py` |
+| `.dsh/fresh_clone_check.py` | 全新 clone → 一键起全栈 → 16 项 E2E → 原栈恢复（会停/起 docker） | `python .dsh/fresh_clone_check.py` |
+| `.dsh/run_status.py` | 看某条 Run 的状态、心跳、花费与中断原因 | `python .dsh/run_status.py [run_id …]` |
 | `tests/unit/test_web_ui_contract.py` | 核对「页面 JS 调用的接口」与真实路由逐条对齐（阶段 11「全程不碰命令行」的机器化检查） | `pytest tests/unit/test_web_ui_contract.py -q` |
 
 最近一次实测（2026-09-24，真机口径见《[阶段验收表-真机口径.md](阶段验收表-真机口径.md)》）：
