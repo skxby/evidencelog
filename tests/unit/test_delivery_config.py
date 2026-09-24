@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -66,18 +67,52 @@ def test_dockerfile_runs_as_non_root():
     assert re.search(r"^\s*USER\s+(?!root)\S+", dockerfile, re.MULTILINE), "应当切换到非 root 用户"
 
 
-def test_no_real_key_anywhere_in_tracked_delivery_files():
-    """交付相关文件里不得出现真实密钥。"""
-    real_key_fragment = "REDACTED_REAL_KEY"
-    for name in (
-        "Dockerfile", ".dockerignore", "docker-compose.yml",
-        "README.md", ".env.example", ".github/workflows/ci.yml",
-    ):
+def test_no_real_key_anywhere_in_tracked_files():
+    """**任何已跟踪文件**里都不得出现当前配置的真实密钥。
+
+    为什么从配置读、而不是把密钥写进断言：早先这版测试把真 Key 当常量写在了
+    本文件里（`real_key_fragment = "sk-…"`）——它本意是防泄漏，结果自己就是泄漏源。
+    2026-09-24 开源前置检查时发现，已把该提交从历史里清掉。
+
+    为什么扫**全部**已跟踪文件、而不是几个交付文件：上一次就是这么漏的 ——
+    它只看 Dockerfile / compose / README / ci.yml，而真 Key 躺在 `tests/` 里。
+    这个检查的成本很低（读一遍版本库里的文件），漏一次的代价却是不可逆的。
+    """
+    from app.config import get_settings
+
+    real_key = (get_settings().model_provider_api_key or "").strip()
+    if not real_key:
+        pytest.skip("未配置模型 Key（CI / 新 clone），无从校验")
+
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        check=False,
+    )
+    if listed.returncode != 0 or not listed.stdout:
+        pytest.skip("取不到已跟踪文件清单（非 git 工作区）")
+
+    hits: list[str] = []
+    for name in listed.stdout.split("\0"):
+        if not name:
+            continue
         path = PROJECT_ROOT / name
-        if path.is_file():
-            assert real_key_fragment not in path.read_text(encoding="utf-8"), (
-                f"{name} 里出现了真实密钥"
-            )
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue  # 二进制/读不了的文件跳过（密钥是文本形态）
+        if real_key in text:
+            hits.append(name)
+
+    assert hits == [], (
+        f"这些已跟踪文件里出现了当前配置的真实密钥：{hits} —— "
+        "开源前必须先从文件与历史里清掉，并轮换该 Key"
+    )
 
 
 # ============================================================
