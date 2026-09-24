@@ -2,6 +2,13 @@
 # 那会让 shell 脚本的 shebang 失效、diff 变得不可读。
 * text=auto eol=lf
 
+# 例外：logs/ 下的真实日志语料**不做任何字节改写**。
+# 它们是外部公开数据集（loghub / elastic-examples）的原样副本，
+# 有 5 份就是 CRLF。让 eol=lf 去"顺手规范"等于悄悄改掉语料本身 ——
+# 解析率基线是拿这批字节量出来的，字节变了基线也就不可比了。
+# 固定语料不需要可读 diff，保真优先。
+logs/*.log -text
+
 # 二进制文件不做转换
 *.png binary
 *.jpg binary
