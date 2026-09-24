@@ -47,6 +47,23 @@ V1 是个人全栈、单领域、**只读**的日志分析 Runtime：上传日�
 
 ## 2. 一键起全栈
 
+**Windows 最省事的一条路**：装好 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 并让它跑起来，
+然后**双击仓库根目录的 `启动.cmd`** —— 它会自己 `docker compose up -d`、等健康检查通过、
+再把 `http://127.0.0.1:8000/login` 在浏览器里打开。停止就双击 `停止.cmd`（数据卷保留，上传与分析结果都还在）。
+
+想先看看"跑完一次真实分析长什么样"：
+
+- **不装 Python 也行的路** —— 页面上三步：① 注册一个账号 → ② 新建项目 →
+  ③ 在项目页上传一份真语料（用仓库里的 `logs/Mac_2k.log` 就行，2000 行真实系统日志）
+  → 点「发起分析」，等 20 秒左右就能看到带证据的结论。
+- **想一条命令备好**（需要宿主 Python，见第 6 节建 `.venv`）：
+
+```powershell
+.venv\Scripts\python.exe .dsh\demo_setup.py     # 建好演示账号 + 一份已跑完的报告，并打印可点的链接
+```
+
+下面是手工版（Linux / macOS / 想自己控制每一步时用）：
+
 ```bash
 git clone <本仓库>
 cd <仓库目录>
@@ -245,7 +262,8 @@ RUN_LIVE_MODEL_TESTS=1 pytest tests/integration/test_gateway_live.py -v -s
 | `.dsh/knowledge_loop_probe.py` | 知识闭环：候选 → 经接口确认 → 下次分析是否加载 | `python .dsh/knowledge_loop_probe.py <project_id>` |
 | `.dsh/edge_scenarios.py` | 边界场景：迁移回滚 / 模型不可用降级 / 假 event_id / 极小预算 partial / L1 样本 / 重试入口 | `python .dsh/edge_scenarios.py --migration`（其余模式见文件头） |
 | `.dsh/stub_provider.py` | 本地桩供应商（OpenAI 兼容）：造假 event_id、可控 token 用量，**零费用**验异常输入 | `python .dsh/stub_provider.py` |
-| `.dsh/fresh_clone_check.py` | 全新 clone → 一键起全栈 → 16 项 E2E → 原栈恢复（会停/起 docker） | `python .dsh/fresh_clone_check.py` |
+| `.dsh/fresh_clone_check.py` | 全新 clone → 一键起全栈 → 16 项 E2E → 原栈恢复（会停/起 docker） | `python .dsh/fresh_clone_check.py [--remote <url>]` |
+| `.dsh/demo_setup.py` | 备好一个**可直接点开**的演示环境（已知账号 + 项目 + 真实语料 + 一次跑完的分析），并打印链接 | `python .dsh/demo_setup.py [--log logs/Linux_2k.log] [--no-run]` |
 | `.dsh/run_status.py` | 看某条 Run 的状态、心跳、花费与中断原因 | `python .dsh/run_status.py [run_id …]` |
 | `tests/unit/test_web_ui_contract.py` | 核对「页面 JS 调用的接口」与真实路由逐条对齐（阶段 11「全程不碰命令行」的机器化检查） | `pytest tests/unit/test_web_ui_contract.py -q` |
 
