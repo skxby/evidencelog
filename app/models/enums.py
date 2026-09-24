@@ -66,8 +66,10 @@ def agent_run_check_sql(column: str = "status") -> str:
     return f"{column} IN (" + ", ".join(f"'{s}'" for s in AGENT_RUN_STATES) + ")"
 
 
-def is_terminal_agent_run_status(status: str) -> bool:
-    return status in AGENT_RUN_TERMINAL_STATES
+# 这里曾有 `is_terminal_agent_run_status(status)`：与
+# `app.analysis.state_machine.is_terminal` 是同一件事的两份实现。
+# 状态判定的真源只有一个（state_machine 开头就写明"本模块是状态转移的唯一真源"），
+# 留两份迟早会漂移。已删除 —— 要判终态请用 state_machine.is_terminal。
 
 
 # ============================================================

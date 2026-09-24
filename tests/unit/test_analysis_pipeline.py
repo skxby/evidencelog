@@ -988,3 +988,180 @@ def test_explicit_output_budget_still_honoured():
         max_output_tokens=123,
     )
     assert router.max_output_tokens == [123]
+
+
+# ============================================================
+# 回归：L2 置信度不足要真的升级 L3（计划第 778 行）
+# ============================================================
+
+
+class TierRecordingRouter:
+    """记录每次调用用的等级，按等级返回不同置信度的结论。"""
+
+    def __init__(self, *, l2_confidence: float, l3_payload: dict | None = None) -> None:
+        self.l2_confidence = l2_confidence
+        self.l3_payload = l3_payload
+        self.tiers: list[str] = []
+
+    def generate(self, *, tier, prompt, schema, max_output_tokens, **kwargs):
+        from app.gateways.base import ModelResult
+
+        self.tiers.append(tier)
+        if tier == "L3" and self.l3_payload is not None:
+            payload = self.l3_payload
+        else:
+            payload = {
+                "insights": [
+                    {
+                        "type": "inference",
+                        "severity": "medium",
+                        "confidence": self.l2_confidence,
+                        "title": "疑似问题",
+                        "summary": "证据指向某个问题",
+                        "evidence_ids": ["1"],
+                        "reasoning": "关键词与时间相关性",
+                    }
+                ],
+                "knowledge_candidates": [],
+            }
+        return ModelResult(
+            content="{}", parsed=payload, tokens_input=100, tokens_output=50,
+            model=f"fake-{tier}", tier=tier, cost=0.002,
+        )
+
+
+def _l2_events() -> list[dict]:
+    """造一个刚好落到 L2 的场景。
+
+    L1 的门槛是 `error_count < 10`，所以这里给 **10 条 high** —— 刚好越过 L1、
+    又远不到 L2 的上限 50。同时：单一时间簇、无 analyzer 命中（消息里不出现
+    crash/segfault/oom 等词），避免"多类型/高危异常"把它推到 L3。
+    """
+    from datetime import timedelta as _td
+
+    return [
+        {
+            "event_id": i,
+            "source_id": 1,
+            "timestamp": T0 + _td(seconds=i),
+            "severity": "high",
+            "event_type": "log",
+            "message": f"connection reset by peer (attempt {i})",
+        }
+        for i in range(1, 11)
+    ]
+
+
+def test_low_l2_confidence_escalates_and_reruns_at_l3():
+    """L2 结论平均置信度低于阈值 → 真的再用 L3 跑一次，并采用 L3 的结论。
+
+    此前这条只在单测里成立：`assess_complexity(l2_confidence=…)` 这个参数、
+    `LOW_CONFIDENCE_ESCALATION`、`should_escalate_after_l2` 全都在，
+    **真实路径里没人传过 l2_confidence** —— 计划第 778 行的第三个 L3 触发条件
+    在真机上永远不会发生。
+    """
+    from app.analysis.pipeline import PipelineInput, analyze
+
+    router = TierRecordingRouter(l2_confidence=0.2)  # 低于 0.5 阈值
+    result = analyze(
+        PipelineInput(
+            project_id=1, source_id=1, domain_id="computer_monitoring",
+            domain_version="1.0.0", time_start=T0, time_end=T0 + timedelta(hours=1),
+            events=_l2_events(),
+        ),
+        analyzers=_fake_domain().analyzers(),
+        domain=_fake_domain(),
+        router=router,
+    )
+
+    assert result.complexity.tier == "L2", "这个场景本身应当先判到 L2"
+    assert router.tiers == ["L2", "L3"], (
+        f"应当在 L2 之后自动升到 L3 再跑一次，实际调用序列 {router.tiers}"
+    )
+    assert result.tier == "L3", "升级后结果等级应记成 L3"
+    assert any("升级 L3" in note for note in result.notes)
+
+
+def test_high_l2_confidence_does_not_escalate():
+    """置信度够高就不该多花一次 L3 的钱。"""
+    from app.analysis.pipeline import PipelineInput, analyze
+
+    router = TierRecordingRouter(l2_confidence=0.9)
+    result = analyze(
+        PipelineInput(
+            project_id=1, source_id=1, domain_id="computer_monitoring",
+            domain_version="1.0.0", time_start=T0, time_end=T0 + timedelta(hours=1),
+            events=_l2_events(),
+        ),
+        analyzers=_fake_domain().analyzers(),
+        domain=_fake_domain(),
+        router=router,
+    )
+
+    assert router.tiers == ["L2"], f"不该升级，实际调用序列 {router.tiers}"
+    assert result.tier == "L2"
+
+
+def test_failed_escalation_keeps_the_l2_result():
+    """升级失败不能赔掉已有的 L2 结论 —— 升级是锦上添花，不是雪上加霜。"""
+    from app.analysis.pipeline import PipelineInput, analyze
+
+    class EscalationBoomRouter(TierRecordingRouter):
+        def generate(self, *, tier, prompt, schema, max_output_tokens, **kwargs):
+            if tier == "L3":
+                from app.gateways.base import StructuredOutputError
+
+                self.tiers.append(tier)
+                raise StructuredOutputError("L3 输出被截断（模拟）")
+            return super().generate(
+                tier=tier, prompt=prompt, schema=schema,
+                max_output_tokens=max_output_tokens, **kwargs,
+            )
+
+    router = EscalationBoomRouter(l2_confidence=0.2)
+    result = analyze(
+        PipelineInput(
+            project_id=1, source_id=1, domain_id="computer_monitoring",
+            domain_version="1.0.0", time_start=T0, time_end=T0 + timedelta(hours=1),
+            events=_l2_events(),
+        ),
+        analyzers=_fake_domain().analyzers(),
+        domain=_fake_domain(),
+        router=router,
+    )
+
+    assert router.tiers == ["L2", "L3"]
+    assert result.tier == "L2", "升级失败后应退回 L2"
+    assert len(result.insights) == 1, "L2 拿到的结论必须保留"
+    assert any("保留 L2 结论" in note for note in result.notes)
+
+
+def test_escalation_does_not_happen_without_any_conclusion():
+    """L2 一条结论都没有时不去升级：问题不在"置信度"，再花钱问也问不出来。"""
+    from app.analysis.pipeline import PipelineInput, analyze
+
+    class EmptyRouter:
+        def __init__(self) -> None:
+            self.tiers: list[str] = []
+
+        def generate(self, *, tier, prompt, schema, max_output_tokens, **kwargs):
+            from app.gateways.base import ModelResult
+
+            self.tiers.append(tier)
+            return ModelResult(
+                content="{}", parsed={"insights": []}, tokens_input=10,
+                tokens_output=5, model="fake", tier=tier, cost=0.0,
+            )
+
+    router = EmptyRouter()
+    analyze(
+        PipelineInput(
+            project_id=1, source_id=1, domain_id="computer_monitoring",
+            domain_version="1.0.0", time_start=T0, time_end=T0 + timedelta(hours=1),
+            events=_l2_events(),
+        ),
+        analyzers=_fake_domain().analyzers(),
+        domain=_fake_domain(),
+        router=router,
+    )
+    assert router.tiers == ["L2"], f"无结论时不该升级，实际 {router.tiers}"

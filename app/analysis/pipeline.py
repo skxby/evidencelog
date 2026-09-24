@@ -29,9 +29,11 @@ from datetime import datetime
 from typing import Any
 
 from app.analysis.complexity import (
+    LOW_CONFIDENCE_ESCALATION,
     ComplexityAssessment,
     assess_complexity,
     count_time_clusters,
+    should_escalate_after_l2,
 )
 from app.analysis.context import DistilledContext, build_distilled_context
 from app.analysis.evidence import (
@@ -48,7 +50,7 @@ from app.analysis.grouping import (
     cluster_events,
     merge_into_incidents,
 )
-from app.gateways.base import TIER_L0, StructuredOutputError
+from app.gateways.base import TIER_L0, TIER_L2, TIER_L3, StructuredOutputError
 from app.policy.cost_controller import StopExecution
 from app.tools.data_ops import stats_calculator
 
@@ -478,7 +480,122 @@ def analyze(
         project_id=project_id_for_recording or pipeline_input.project_id,
         run_id=run_id,
     )
+
+    # ---- 计划第 778 行：L2 分析后置信度不足 → 升级 L3 再分析一次 ----
+    #
+    # 这是 L3 的**第三个**触发条件（另两个是 high 异常、多簇多类型）。
+    # 此前它是空头承诺：`assess_complexity(l2_confidence=…)` 这个参数、
+    # `LOW_CONFIDENCE_ESCALATION`、`should_escalate_after_l2` 全都在，
+    # **但没有任何真实路径传过 l2_confidence** —— 于是"置信度不足自动升级"
+    # 只在单测里成立，真机上永远不发生。
+    _maybe_escalate_to_l3(
+        result,
+        context=context,
+        router=router,
+        max_output_tokens=OUTPUT_TOKEN_BUDGET_BY_TIER.get(TIER_L3, 8000),
+        enable_self_critique=enable_self_critique,
+        record=record,
+        project_id=project_id_for_recording or pipeline_input.project_id,
+        run_id=run_id,
+    )
     return result
+
+
+def _mean_confidence(insights: list[ValidatedInsight]) -> float | None:
+    """结论的平均置信度；没有结论时返回 None（**不判定**，而不是当作 0）。"""
+    if not insights:
+        return None
+    return sum(float(i.confidence) for i in insights) / len(insights)
+
+
+def _maybe_escalate_to_l3(
+    result: PipelineResult,
+    *,
+    context: DistilledContext,
+    router: Any,
+    max_output_tokens: int,
+    enable_self_critique: bool,
+    record: bool,
+    project_id: int,
+    run_id: int | None,
+) -> None:
+    """L2 结论置信度不足时按 L3 重跑一次（计划第 778 行）。
+
+    三个刻意的取舍：
+
+    1. **只在 L2 且已有结论时考虑**。没有结论说明问题不在"置信度"上，
+       再花一次 L3 的钱也问不出东西。
+    2. **升级失败不能赔掉已有的 L2 结论**：所以这里把 L3 那次调用整个包在
+       try/except 里 —— 升级是"锦上添花"，不能把它做成"雪上加霜"。
+       预算到顶（StopExecution）同样按保留处理，并记下原因。
+    3. **沿用 L2 的 Context**，不按 L3 预算重建：升级的语义是"换个更强的模型
+       再看看同一批证据"，重建上下文会把成本推高到另一档，
+       而这一步本来就是因为"原来看得不够准"才做的。
+    """
+    if result.tier != TIER_L2 or router is None:
+        return
+
+    confidence = _mean_confidence(result.insights)
+    if confidence is None or not should_escalate_after_l2(confidence):
+        return
+
+    from app.policy.cost_controller import StopExecution
+
+    kept_insights = list(result.insights)
+    kept_candidates = list(result.knowledge_candidates)
+
+    result.notes.append(
+        f"L2 平均置信度 {confidence:.2f} 低于 "
+        f"{LOW_CONFIDENCE_ESCALATION}，按计划第 778 行升级 L3 重分析"
+    )
+    result.insights = []
+    result.knowledge_candidates = []
+    result.tier = TIER_L3
+
+    try:
+        _run_model_analysis(
+            result,
+            context=context,
+            router=router,
+            complexity_tier=TIER_L3,
+            max_output_tokens=max_output_tokens,
+            enable_self_critique=enable_self_critique,
+            record=record,
+            project_id=project_id,
+            run_id=run_id,
+        )
+    except (StructuredOutputError, StopExecution) as exc:
+        # 升级没成：把 L2 的结论放回去，如实记一句，别让"尝试升级"毁掉已有结果
+        result.insights = kept_insights
+        result.knowledge_candidates = kept_candidates
+        result.tier = TIER_L2
+        result.notes.append(
+            f"升级 L3 未成功（{type(exc).__name__}: {exc}），保留 L2 结论"
+        )
+        if isinstance(exc, StopExecution):
+            result.stop_reason = exc.reason
+        return
+    except Exception as exc:  # noqa: BLE001 - 模型不可用同理：保留 L2 结论
+        result.insights = kept_insights
+        result.knowledge_candidates = kept_candidates
+        result.tier = TIER_L2
+        result.notes.append(
+            f"升级 L3 失败（{type(exc).__name__}: {exc}），保留 L2 结论"
+        )
+        return
+
+    if not result.insights:
+        # L3 反而什么都没给出：退回 L2 的结论，别用"空"覆盖"有"
+        result.insights = kept_insights
+        result.knowledge_candidates = kept_candidates
+        result.tier = TIER_L2
+        result.notes.append("升级 L3 未产出结论，保留 L2 结论")
+        return
+
+    result.notes.append(
+        f"已升级 L3 重分析：L2 平均置信度 {confidence:.2f} → "
+        f"L3 产出 {len(result.insights)} 条结论"
+    )
 
 
 def _group_severity(group: dict[str, Any], events: list[dict[str, Any]]) -> str:

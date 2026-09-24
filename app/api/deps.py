@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import Cookie, Depends, Header, HTTPException, Path, status
 from sqlalchemy.orm import Session
@@ -112,11 +112,3 @@ def get_project_scope(
 
 
 ProjectScopeDep = Annotated[ProjectScope, Depends(get_project_scope)]
-
-
-def require_json_body(body: Any) -> Any:
-    """占位：保留给后续需要显式校验 body 非空的端点。
-
-    目前 FastAPI 的 Pydantic 模型已覆盖这一点，故这里只做类型标注用途。
-    """
-    return body

@@ -141,8 +141,3 @@ def get_logger(name: str | None = None) -> Any:
     if not _configured:
         configure_logging()
     return structlog.get_logger(name) if name else structlog.get_logger()
-
-
-def log_event(event: str, **fields: Any) -> None:
-    """记一条结构化事件。找不到 logger 时不应让业务失败。"""
-    get_logger().info(event, **fields)

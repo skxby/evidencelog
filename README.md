@@ -215,6 +215,7 @@ RUN_LIVE_MODEL_TESTS=1 pytest tests/integration/test_gateway_live.py -v -s
 | `.dsh/stage_verify.py` | 按「阶段 → 承载验收的测试文件」出可核对的计数表 | `python .dsh/stage_verify.py` |
 | `.dsh/final_verify.cjs` | 对着**真跑起来的全栈**做 16 项端到端检查（真实 HTTP） | `node .dsh/final_verify.cjs` |
 | `.dsh/budget_gate_check.py` | 对着真栈核验成本闸门（预算不足拒绝创建 / 金额精度 / 未设预算放行） | `python .dsh/budget_gate_check.py` |
+| `.dsh/dead_wiring_audit.py` | 扫出"写好了但没接上"的符号（本轮多起故障都是这一形态） | `python .dsh/dead_wiring_audit.py` |
 | `tests/unit/test_web_ui_contract.py` | 核对「页面 JS 调用的接口」与真实路由逐条对齐（阶段 11「全程不碰命令行」的机器化检查） | `pytest tests/unit/test_web_ui_contract.py -q` |
 
 最近一次实测（2026-09-24）：

@@ -44,13 +44,21 @@ def test_terminal_and_non_terminal_partition_the_seven_states():
 def test_failed_is_not_revivable():
     """计划第 692 行：failed 不可原地复活，只能新建 Run。"""
     assert enums.AGENT_RUN_REVIVABLE_STATES == frozenset()
-    assert enums.is_terminal_agent_run_status("failed") is True
 
 
-def test_is_terminal_helper_matches_constant_set():
+def test_terminal_judgement_has_a_single_source():
+    """终态判定只允许有一个真源 —— `state_machine.is_terminal`。
+
+    这里曾有 `enums.is_terminal_agent_run_status`，与它重复。两份实现迟早会漂移，
+    而"哪个算终态"直接决定能不能改状态，漂移的后果是静默地改坏历史 Run。
+    """
+    from app.analysis.state_machine import is_terminal
+
+    assert not hasattr(enums, "is_terminal_agent_run_status"), (
+        "终态判定不该在 enums 里再留一份；请用 state_machine.is_terminal"
+    )
     for state in enums.AGENT_RUN_STATES:
-        expected = state in enums.AGENT_RUN_TERMINAL_STATES
-        assert enums.is_terminal_agent_run_status(state) is expected
+        assert is_terminal(state) is (state in enums.AGENT_RUN_TERMINAL_STATES)
 
 
 def test_agent_run_check_sql_lists_all_seven_states():

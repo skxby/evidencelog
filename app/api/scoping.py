@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
@@ -86,28 +86,20 @@ def get_insight_scope(
 InsightScopeDep = Annotated[InsightScope, Depends(get_insight_scope)]
 
 
-def assert_same_project(resource_project_id: int, path_project_id: int, *, what: str) -> None:
-    """校验嵌套路由里的两者属于同一个 Project。
+def assert_same_project(resource_project_id: int, claimed_project_id: int, *, what: str) -> None:
+    """校验"资源自身的 project"与"调用方声明的 project"一致。
 
-    例如 `/api/projects/{project_id}/...` 里引用的资源必须属于同一个 project，
-    否则就是跨项目访问。返回 404 而不是 403。
+    为什么需要它：页面上的 JS 会按模板拼上 `?project_id=…`（页面知道自己在哪个项目里），
+    而按资源 id 鉴权的端点并**不读**这个参数 —— 于是它成了一个"看起来在校验、
+    其实被忽略"的参数。把两者对一下，跨项目访问就多了一道防线，
+    也免得后人以为这个参数有用（本轮已经在别的参数上吃过这个亏）。
+
+    不一致时返回 404 而不是 403：403 会暗示"该 id 存在但不属于你"。
     """
-    if int(resource_project_id) != int(path_project_id):
+    if int(resource_project_id) != int(claimed_project_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"{what} 不存在"
         )
-
-
-def owned_project_ids(session: Session, user_id: int) -> set[int]:
-    """当前用户拥有的全部 project_id，供批量过滤使用。"""
-    return {int(p.id) for p in ProjectRepository(session).list_for_user(user_id)}
-
-
-def ensure_owned(resource: Any, owned: set[int]) -> Any:
-    """对象为空或不属于已拥有的 project 时返回 None。"""
-    if resource is None:
-        return None
-    return resource if int(resource.project_id) in owned else None
 
 
 def get_owned_project_id(

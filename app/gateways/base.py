@@ -167,7 +167,3 @@ class ModelGateway(ABC):
         `schema` 非空时要求结构化输出（JSON）；拿不到合法 JSON 必须抛
         `StructuredOutputError`，**不得退化成纯文本**。
         """
-
-
-def requests_structured_output(schema: dict[str, Any] | None) -> bool:
-    return schema is not None

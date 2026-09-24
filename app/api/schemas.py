@@ -17,8 +17,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette import status
 
-from app.gateways.base import MODEL_TIERS
-
 #: 422 的状态常量。
 #
 # Starlette 1.7 起把 `HTTP_422_UNPROCESSABLE_ENTITY` 改名成
@@ -247,7 +245,3 @@ class KnowledgeActionResponse(StrictModel):
     candidate_id: str
     action: str
     status: str
-
-
-def tier_choices() -> tuple[str, ...]:
-    return MODEL_TIERS

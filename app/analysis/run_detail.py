@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from app.analysis.state_machine import allowed_targets
 from app.models.enums import AGENT_RUN_STATES
 
 
@@ -343,11 +342,3 @@ def audit_run_detail(detail: RunDetail) -> list[str]:
             problems.append(f"阶段历史条目形状异常：{entry!r}")
 
     return problems
-
-
-def allowed_next_statuses(status: str) -> list[str]:
-    """当前状态下允许转移到哪些状态（复用状态机，不另写一份）。"""
-    try:
-        return sorted(allowed_targets(status))
-    except Exception:  # noqa: BLE001 - 非法状态不影响详情展示
-        return []

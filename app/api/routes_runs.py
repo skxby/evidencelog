@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 
-from app.analysis.idempotency import make_idempotency_key
 from app.analysis.runner import RunRequest, create_run
 from app.api.deps import ProjectScopeDep, SessionDep
 from app.api.schemas import (
@@ -26,7 +26,7 @@ from app.api.schemas import (
     RunResponse,
     UploadResponse,
 )
-from app.api.scoping import InsightScopeDep, RunScopeDep
+from app.api.scoping import InsightScopeDep, RunScopeDep, assert_same_project
 from app.config import get_settings
 from app.models import enums
 from app.models.insight import Insight
@@ -316,9 +316,18 @@ def retry_analysis_run(scope: RunScopeDep, session: SessionDep) -> CreateRunResp
 
 
 @router.get("/api/runs/{run_id}", response_model=RunResponse, tags=["runs"])
-def get_run(scope: RunScopeDep) -> RunResponse:
-    """状态、进度、成本（计划第 868 行）。"""
+def get_run(
+    scope: RunScopeDep,
+    project_id: Annotated[int | None, Query(ge=1, description="页面所属项目，用于交叉核对")] = None,
+) -> RunResponse:
+    """状态、进度、成本（计划第 868 行）。
+
+    `project_id` 是页面 JS 会带上的参数。以前它被**静默忽略** ——
+    看起来在校验，其实没人读。现在带上就核对，不带也照样按资源自身归属鉴权。
+    """
     run = scope.run
+    if project_id is not None:
+        assert_same_project(scope.project_id, project_id, what="Run")
     return RunResponse(
         id=int(run.id),
         project_id=int(run.project_id),
@@ -338,15 +347,23 @@ def get_run(scope: RunScopeDep) -> RunResponse:
 
 
 @router.get("/api/runs/{run_id}/detail", tags=["runs"])
-def get_run_detail(scope: RunScopeDep, session: SessionDep) -> dict:
+def get_run_detail(
+    scope: RunScopeDep,
+    session: SessionDep,
+    project_id: Annotated[int | None, Query(ge=1, description="页面所属项目，用于交叉核对")] = None,
+) -> dict:
     """Run 详情：一次复述「做了什么、花了多少、为何得到这个结论」（计划第 940 行）。
 
     这是**只读聚合**：把散落在 run / model_calls / tool_usage / insights /
     evidences 里的信息按"审阅者会问的问题"重新组织，并顺带自检说不通的地方。
+
+    `project_id` 若带上就交叉核对（见 `assert_same_project`）。
     """
     from app.analysis.run_detail import build_run_detail
 
     run = scope.run
+    if project_id is not None:
+        assert_same_project(scope.project_id, project_id, what="Run")
 
     insights = InsightRepository(session).list_for_run(scope.project_id, scope.run_id)
     evidence_repo = EvidenceRepository(session)
@@ -415,9 +432,17 @@ def get_insight(scope: InsightScopeDep) -> InsightResponse:
     tags=["insights"],
 )
 def list_insight_evidence(
-    scope: InsightScopeDep, session: SessionDep
+    scope: InsightScopeDep,
+    session: SessionDep,
+    project_id: Annotated[int | None, Query(ge=1, description="页面所属项目，用于交叉核对")] = None,
 ) -> list[EvidenceResponse]:
-    """证据是「fact 可点击核对」的数据来源（阶段 11 验收）。"""
+    """证据是「fact 可点击核对」的数据来源（阶段 11 验收）。
+
+    `project_id` 是报告页 JS 会带上的参数；带上就核对一次归属，
+    不再像以前那样收下却不用。
+    """
+    if project_id is not None:
+        assert_same_project(scope.project_id, project_id, what="Insight")
     rows = EvidenceRepository(session).list_for_insight(
         scope.project_id, scope.insight_id
     )
@@ -495,17 +520,4 @@ def _insight_response(insight: Insight) -> InsightResponse:
         limitations=insight.limitations,
         run_metadata=insight.run_metadata,
         created_at=insight.created_at,
-    )
-
-
-def build_idempotency_key_for(request: RunRequest) -> str:
-    """供测试与排障直接算键，避免测试自己重写一遍算法。"""
-    return make_idempotency_key(
-        project_id=request.project_id,
-        source_id=request.source_id,
-        time_start=request.time_start,
-        time_end=request.time_end,
-        filters=request.filters,
-        domain_id=request.domain_id,
-        domain_version=request.domain_version,
     )

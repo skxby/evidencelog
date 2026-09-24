@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
@@ -301,9 +300,3 @@ def _seed_dir() -> Path:
         / "knowledge"
         / "confirmed"
     )
-
-
-def reset_runtime_knowledge() -> None:
-    """仅供测试/运维：清空运行时知识（不动 seed）。"""
-    for directory in (_confirmed_dir(), _data_dir() / "knowledge" / DOMAIN_ID / "staging"):
-        shutil.rmtree(directory, ignore_errors=True)
