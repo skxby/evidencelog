@@ -31,3 +31,19 @@ class ProjectRepository:
     def add(self, project: Project) -> Project:
         self.session.add(project)
         return project
+
+    def add_budget_used(self, project_id: int, amount: float) -> float:
+        """把一次 Run 的实际花费累加进 `budget_used`，返回累加后的值。
+
+        这是计划第 650–652 行 Post-check 的"累加回 Project.budget_used"那一半。
+        此前没人调用它 —— 后果是 `budget_used` 永远是 0：项目预算**永远花不完**，
+        于是"月度预算不足就拒绝创建"这道闸门即使接上也不会触发。
+
+        `amount <= 0` 时也照样写回（幂等：写的是同一个值），但不做无谓的加零。
+        """
+        project = self.session.get(Project, project_id)
+        if project is None:
+            raise ValueError(f"Project {project_id} 不存在，拒绝写预算")
+        current = float(project.budget_used or 0.0)
+        project.budget_used = current + max(0.0, float(amount))
+        return float(project.budget_used)

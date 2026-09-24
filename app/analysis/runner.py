@@ -39,6 +39,19 @@ from app.analysis.retry import RetryPolicy, call_with_fallback
 from app.analysis.state_machine import IllegalTransitionError, StateMachine
 from app.models import enums
 from app.policy import STOP_MODEL_UNAVAILABLE
+from app.policy.policy import (
+    STOP_BUDGET_EXCEEDED,
+    STOP_CALL_LIMIT,
+    STOP_RUNTIME_LIMIT,
+    STOP_TOKEN_LIMIT,
+)
+
+#: 策略到顶导致的停止 —— 这些应当落到 `partial_success`（返回已完成部分），
+#: 而不是 `failed`（计划第 647–648 行）。与 `model_unavailable` 的区别是：
+#: 前者"到点收工、已有结论"，后者"压根没拿到结论"。
+POLICY_STOP_REASONS: frozenset[str] = frozenset(
+    {STOP_BUDGET_EXCEEDED, STOP_TOKEN_LIMIT, STOP_RUNTIME_LIMIT, STOP_CALL_LIMIT}
+)
 
 
 @dataclass
@@ -81,10 +94,12 @@ class RunOutcome:
     value: Any = None
     attempts: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    #: 本次实际产出的结论/证据条数。调用方（分析任务）落库后回填，
-    #: 这样 Run 详情能如实显示"产出了几条"，而不是永远显示 0。
-    insight_count: int = 0
-    evidence_count: int = 0
+
+    # 这里曾有 `insight_count` / `evidence_count` 两个字段，注释写着
+    # "调用方落库后回填"。**从来没有任何代码给它们赋过值，也没有任何地方读它们** ——
+    # 产出台数实际落在 `AgentRun.run_metadata`（`insight_count` / `evidence_count`），
+    # Run 详情就是从那读的。留着这两个字段等于摆一个"看起来该填但没人填"的坑，
+    # 下一个读代码的人会以为它有值。故删除；要查产出台数请看 run_metadata。
 
     def as_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -240,13 +255,23 @@ class RunExecutor:
                 stop_reason = STOP_MODEL_UNAVAILABLE
                 error_message = "全部模型等级不可用，已输出纯规则报告"
             else:
-                # 全部等级失败且没有规则兜底
-                target = enums.AGENT_RUN_FAILED
-                stop_reason = outcome.stop_reason or STOP_MODEL_UNAVAILABLE
-                # 从尝试历史里取出真正的错误原文。
-                # 只落库不带回的话，调用方拿到的失败结果是"没有原因的失败"——
-                # 页面只能显示"失败了"，排障得去翻库，正是红线 4 要避免的含糊。
-                error_message = _last_error_from(outcome)
+                # 没有 ok 的等级尝试。这里要分两种情况 —— 混在一起会把
+                # "钱花完了但已有结论"报成"跑挂了"。
+                if outcome.stop_reason in POLICY_STOP_REASONS:
+                    # 计划第 647–648 行：策略到顶 → **partial_success**，
+                    # 返回已完成部分。理由：这不是故障，是"到点收工"；
+                    # 报成 failed 会让已经有结论的 Run 看起来一无所有。
+                    target = enums.AGENT_RUN_PARTIAL_SUCCESS
+                    stop_reason = outcome.stop_reason
+                    error_message = _last_error_from(outcome) or "已达策略上限，结果不完整"
+                else:
+                    # 全部等级失败且没有规则兜底
+                    target = enums.AGENT_RUN_FAILED
+                    stop_reason = outcome.stop_reason or STOP_MODEL_UNAVAILABLE
+                    # 从尝试历史里取出真正的错误原文。
+                    # 只落库不带回的话，调用方拿到的失败结果是"没有原因的失败"——
+                    # 页面只能显示"失败了"，排障得去翻库，正是红线 4 要避免的含糊。
+                    error_message = _last_error_from(outcome)
 
             metadata = self._metadata(
                 machine, stop_reason, outcome, extra=extra_metadata

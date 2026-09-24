@@ -142,6 +142,25 @@ def create_analysis_run(
     )
 
     filters = payload.filters.model_dump(exclude_none=True) if payload.filters else {}
+
+    # ---- Pre-check（计划第 642–644 行）：预算不足**拒绝创建** ----
+    #
+    # 这一步以前完全不存在：CostController 写得再全，真实路径里没人构造它，
+    # 于是"预算不足拒绝创建"这条验收只在单测里成立，真机上可以拿一个
+    # 已经花光的项目一直发起分析。
+    from app.models.project import Project
+    from app.policy.wiring import build_cost_controller
+
+    project_row = session.get(Project, scope.project_id)
+    controller = build_cost_controller(project=project_row)
+    if controller is not None:
+        pre = controller.pre_check(payload.start_tier or "L2")
+        if not pre.allowed:
+            # 402 而不是 422：这不是"参数写错了"，是"钱不够"。
+            # 用 402 让调用方一眼分清该改参数还是该加预算。
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                                detail=pre.message or pre.reason)
+
     request = RunRequest(
         project_id=scope.project_id,
         source_id=int(source.id),

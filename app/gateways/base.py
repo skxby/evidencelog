@@ -67,17 +67,39 @@ class TierConfig:
     reasoning: str
     price_input_per_1m: float
     price_output_per_1m: float
+    #: 缓存命中的输入单价（元 / 每百万 token）。0 表示"未配置"——
+    #: 此时命中部分仍按正常输入价计，**不做任何静默折扣**：
+    #: 悄悄按更便宜的价算会让账单看起来比实际低，方向正好是危险的。
+    price_cache_hit_input_per_1m: float = 0.0
 
-    def estimate_cost(self, tokens_input: int, tokens_output: int) -> float:
+    def estimate_cost(
+        self, tokens_input: int, tokens_output: int, *, cached_tokens: int = 0
+    ) -> float:
         """按 token 用量估算成本（元）。
 
-        这是**估算**：不含缓存命中折扣与峰谷差异。阶段 07 的成本控制会在此基础上
-        区分命中/未命中与峰谷；这里只保证「有数可记」。
+        缓存命中的输入 token 按 `price_cache_hit_input_per_1m` 计（未配置则按正常价）。
+        供应商返回的输入 token 数**包含**命中部分（DeepSeek 另用
+        `prompt_cache_hit_tokens` 给出命中数），故计费输入 = 输入 - 命中。
+
+        为什么必须区分：命中价通常比输入价低一个数量级（示例配置 0.02 vs 0.5）。
+        一律按输入价算会**高估**成本，而高估的那部分会被 Mid-check 的
+        「已花成本 ≥ run_max_cost」读到，让 Run 提前判定超预算而中断 ——
+        等于拿一份偏高的账单去砍本来还能跑完的分析。
+
+        这个折扣此前一直是空头承诺：本函数的 docstring 写着"阶段 07 的成本控制
+        会在此基础上区分命中/未命中"，而 `MODEL_CACHE_HIT_INPUT_PRICE_PER_1M`
+        在代码里从没被读过，`cached_tokens` 也只是记下来、没进过成本公式。
         """
-        return (
-            tokens_input / 1_000_000 * self.price_input_per_1m
-            + tokens_output / 1_000_000 * self.price_output_per_1m
-        )
+        cached = max(0, min(int(cached_tokens), int(tokens_input)))
+        if self.price_cache_hit_input_per_1m > 0:
+            billable_input = tokens_input - cached
+            input_cost = (
+                billable_input / 1_000_000 * self.price_input_per_1m
+                + cached / 1_000_000 * self.price_cache_hit_input_per_1m
+            )
+        else:
+            input_cost = tokens_input / 1_000_000 * self.price_input_per_1m
+        return input_cost + tokens_output / 1_000_000 * self.price_output_per_1m
 
 
 @dataclass

@@ -49,6 +49,7 @@ from app.analysis.grouping import (
     merge_into_incidents,
 )
 from app.gateways.base import TIER_L0, StructuredOutputError
+from app.policy.cost_controller import StopExecution
 from app.tools.data_ops import stats_calculator
 
 #: 各等级的输出 token 预算。
@@ -129,6 +130,11 @@ class PipelineResult:
     anomalies: list[dict[str, Any]] = field(default_factory=list)
     statistics: dict[str, Any] = field(default_factory=dict)
     rules_only_report: dict[str, Any] | None = None
+    #: 因策略上限（预算 / token / 时长 / 调用次数）提前停止时的原因。
+    #: 由 `_run_model_analysis` 捕获 `StopExecution` 后写入 —— 此时**已经拿到的
+    #: 结论必须保留**（计划第 648 行"停止昂贵步骤，返回已完成部分"），
+    #: 只是 Run 的状态该是 partial_success 而不是 completed。
+    stop_reason: str | None = None
     #: 模型调用与重试的留痕
     model_attempts: list[dict[str, Any]] = field(default_factory=list)
     evidence_rejections: int = 0
@@ -570,6 +576,15 @@ def _run_model_analysis(
                 project_id=project_id if record else None,
                 run_id=run_id if record else None,
             )
+        except StopExecution as exc:
+            # 策略到顶（预算 / token / 时长 / 调用次数）：**不是失败**，
+            # 而是"到此为止，把已经拿到的交出去"（计划第 648 行）。
+            # 所以这里不抛、不降级成纯规则报告 —— 只记下原因并跳出循环，
+            # 让上面那个 accepted 列表原样带回去。抛出去的话，
+            # 已经跑完那一轮的结论会连同异常一起被丢掉。
+            result.stop_reason = exc.reason
+            result.notes.append(f"已达策略上限，提前停止：{exc.message}")
+            break
         except StructuredOutputError:
             # 结构化输出失败是**可以换个等级再试**的：常见原因是输出被 token
             # 上限截断，或该等级不擅长按格式作答。**上抛**给 RunExecutor 的

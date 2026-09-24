@@ -196,6 +196,35 @@ def test_create_project_rejects_negative_budget(client: TestClient):
     assert response.status_code == 422
 
 
+def test_create_project_rejects_budget_below_storage_granularity(client: TestClient):
+    """比 0.0001 更小的预算必须报错，而不是被四舍五入成 0（= 不设上限）。
+
+    `budget_total` 列是 `Numeric(12,4)`。若放任 `0.00001` 进去，它会被存成
+    0.0000，而 0 的语义是"未设预算、不拦" —— 用户以为卡得很死，
+    实际等于完全不卡，方向正好是多花钱。
+    """
+    headers = _register(client)
+    response = client.post(
+        "/api/projects",
+        json={"name": "apitest-too-small", "budget_total": 0.00001},
+        headers=headers,
+    )
+    assert response.status_code == 422, response.text
+    assert "精度" in response.text or "0.0001" in response.text
+
+
+def test_create_project_accepts_exact_granularity(client: TestClient):
+    """边界值本身要能过：0.0001 是合法的最小金额。"""
+    headers = _register(client)
+    response = client.post(
+        "/api/projects",
+        json={"name": "apitest-min-budget", "budget_total": 0.0001},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["budget_total"] == pytest.approx(0.0001)
+
+
 def test_data_source_rejects_unsupported_format(client: TestClient):
     headers = _register(client)
     project_id = _make_project(client, headers)
@@ -413,6 +442,78 @@ def test_create_run_returns_immediately_with_run_id_and_queued(client: TestClien
     assert body["reused"] is False
     # 关键：任务被**派发出去**而不是在这里执行
     assert dispatch.call_count == 1
+
+
+def test_create_run_is_refused_when_budget_is_insufficient(client: TestClient):
+    """阶段 07 验收 1（真实路径版）：预算不足**拒绝创建**。
+
+    这条以前只在单测里成立 —— `CostController` 写得再全，真实路径里
+    **没人构造过它**，所以真机上可以拿一个预算见底的项目一直发起分析。
+    现在 Pre-check 接在创建端点上：402（不是 422 —— 这不是参数写错，是钱不够）。
+    """
+    headers = _register(client)
+    # 预算小到连一次 L3 调用都覆盖不了（Pre-check 的估计约 ¥0.018，还叠加 10% 安全边际）。
+    # 注意金额精度是 4 位小数：比 0.0001 更小的值会被数据库四舍五入成 0，
+    # 而 0 的语义是"未设预算"——所以这里用 0.001 而不是 0.00001。
+    project_id = _make_project(client, headers, name="apitest-tiny-budget")
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE projects SET budget_total = 0.001 WHERE id = :i"),
+            {"i": project_id},
+        )
+    source = client.post(
+        f"/api/projects/{project_id}/data-sources",
+        json={"format": "txt"},
+        headers=headers,
+    ).json()
+
+    with patch("app.api.routes_runs._dispatch") as dispatch:
+        response = client.post(
+            f"/api/projects/{project_id}/analysis-runs",
+            json={
+                "data_source_id": source["id"],
+                "start_tier": "L3",
+                "time_range": {
+                    "start": "2026-09-23T12:00:00+00:00",
+                    "end": "2026-09-23T13:00:00+00:00",
+                },
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 402, response.text
+    assert "预算" in response.json()["detail"] or "上限" in response.json()["detail"]
+    # 关键：连任务都没派发出去
+    assert dispatch.call_count == 0
+
+
+def test_create_run_is_allowed_when_budget_is_unset(client: TestClient):
+    """`budget_total = 0`（schema 默认值）视为**未设预算**，不该拦住创建。
+
+    若把默认的 0 当成"预算为零"，所有没显式填预算的项目连一次分析都发不起来 ——
+    那是把默认值当成了策略。真要有上限就填正数（或靠单次 run_max_cost 兜）。
+    """
+    headers = _register(client)
+    project_id = _make_project(client, headers, name="apitest-no-budget")
+    source = client.post(
+        f"/api/projects/{project_id}/data-sources",
+        json={"format": "txt"},
+        headers=headers,
+    ).json()
+
+    with patch("app.api.routes_runs._dispatch"):
+        response = client.post(
+            f"/api/projects/{project_id}/analysis-runs",
+            json={
+                "data_source_id": source["id"],
+                "time_range": {
+                    "start": "2026-09-23T12:00:00+00:00",
+                    "end": "2026-09-23T13:00:00+00:00",
+                },
+            },
+            headers=headers,
+        )
+    assert response.status_code == 202, response.text
 
 
 def test_create_run_does_not_analyse_inline(client: TestClient):

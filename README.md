@@ -130,6 +130,7 @@ logagent-beat       Up
 | `MODEL_L1/L2/L3` | `deepseek-flash` | 等级 → 型号映射。**型号只出现在这里**，业务代码只认 L1–L3 |
 | `MODEL_L*_REASONING` | `off` / `low` / `high` | 合法值只有 `off`/`low`/`high`/`max`；`medium` 是非法值 |
 | `MODEL_L*_PRICE_*_PER_1M` | `1` / `4` | 单价，**元 / 每百万 token**；用于成本核算 |
+| `MODEL_CACHE_HIT_INPUT_PRICE_PER_1M` | `0.02` | 缓存命中的输入单价（比输入价低一个数量级）。按命中 token 数单独计费，不配则按正常输入价 |
 | `MONTHLY_BUDGET` / `DEFAULT_RUN_MAX_COST` | `10` / `0.30` | 预算上限，货币单位统一为**人民币元** |
 | `DATA_DIR` | `./data` | 运行时数据（知识库 confirmed/staging）；compose 里是 `/app/data`（卷） |
 | `DEFAULT_TIMEZONE` | `Asia/Shanghai` | 日志时间戳缺时区时按它解析，再转 UTC 存库 |
@@ -213,6 +214,7 @@ RUN_LIVE_MODEL_TESTS=1 pytest tests/integration/test_gateway_live.py -v -s
 | `.dsh/golden_eval.py` | 跑 Golden Set 五个场景并打印逐条断言与成本 | `python .dsh/golden_eval.py`（加 `RUN_GOLDEN_LIVE=1` 走真模型，**付费**） |
 | `.dsh/stage_verify.py` | 按「阶段 → 承载验收的测试文件」出可核对的计数表 | `python .dsh/stage_verify.py` |
 | `.dsh/final_verify.cjs` | 对着**真跑起来的全栈**做 16 项端到端检查（真实 HTTP） | `node .dsh/final_verify.cjs` |
+| `.dsh/budget_gate_check.py` | 对着真栈核验成本闸门（预算不足拒绝创建 / 金额精度 / 未设预算放行） | `python .dsh/budget_gate_check.py` |
 | `tests/unit/test_web_ui_contract.py` | 核对「页面 JS 调用的接口」与真实路由逐条对齐（阶段 11「全程不碰命令行」的机器化检查） | `pytest tests/unit/test_web_ui_contract.py -q` |
 
 最近一次实测（2026-09-24）：

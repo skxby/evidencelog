@@ -80,6 +80,16 @@ def _execute(
         executor = RunExecutor(run_repository=runs)
         captured: dict[str, Any] = {}
 
+        # 一次 Run 一个成本控制器：三道检查点（Pre 已在创建端点做过、
+        # Mid 在每次调用前、Post 在下面累加预算）共用同一份用量账。
+        from app.models.project import Project
+        from app.policy.wiring import build_cost_controller
+
+        controller = build_cost_controller(project=session.get(Project, project_id))
+        if controller is not None:
+            # 不 start() 的话 elapsed_seconds 恒为 0，时长上限形同虚设
+            controller.start()
+
         def attempt_tier(tier: str) -> Any:
             """每个等级尝试一次完整链路。"""
             try:
@@ -114,6 +124,15 @@ def _execute(
                     error=f"{type(exc).__name__}: {exc}",
                 )
                 raise
+
+            # Mid-check（计划第 646–648 行）：包住 router，让**每次模型调用前**
+            # 都过一次策略（调用次数 / token / 时长 / 单次成本）。不包的话
+            # 这些上限只写在配置里，Run 可以一直调到模型侧先受不了为止。
+            if controller is not None:
+                from app.policy.wiring import PolicyGuardedRouter
+
+                router = PolicyGuardedRouter(router, controller)
+
             result = analyze(
                 PipelineInput(
                     project_id=project_id,
@@ -156,6 +175,20 @@ def _execute(
                 session, project_id=project_id, run_id=run_id, run=run, result=result
             )
             logger.info("insights_persisted", **captured["persisted"])
+
+            if result.stop_reason:
+                # 策略到顶：把**已经拿到的结论落库之后**再上抛，
+                # 让 executor 按计划第 647–648 行把状态收成 partial_success
+                # 并带上真正的原因（预算 / token / 时长 / 调用次数）。
+                #
+                # 顺序很重要：先落库再抛。反过来的话这份"已完成部分"会随异常
+                # 一起被丢掉，等于把 partial_success 做成了 failed。
+                from app.policy.cost_controller import StopExecution
+
+                raise StopExecution(
+                    result.stop_reason,
+                    "；".join(result.notes[-2:]) or "已达策略上限",
+                )
             return result
 
         def rules_only() -> Any:
@@ -239,6 +272,19 @@ def _execute(
             tokens_output=int(run.tokens_output or 0),
             cost=float(run.cost_actual or 0),
         )
+
+        # ---- Post-check（计划第 650–652 行）：把实际花费累加回 Project.budget_used ----
+        #
+        # 这一步以前完全没有：`budget_used` 永远是 0，于是项目预算**永远花不完**，
+        # "预算不足就拒绝创建"那道闸门即使接上也永远不会触发。
+        # 必须放在同一个事务里提交：Run 记了多少钱、项目就扣多少钱，
+        # 两者不能一个成功一个失败。
+        spent = float(run.cost_actual or 0)
+        if spent > 0:
+            from app.repositories.project import ProjectRepository
+
+            budget_used = ProjectRepository(session).add_budget_used(project_id, spent)
+            logger.info("project_budget_accumulated", spent=spent, budget_used=budget_used)
 
         # 提交！这一步绝不能只 flush。
         #

@@ -39,6 +39,9 @@ def read_tier_configs(settings: Any) -> dict[str, TierConfig]:
     （那时错误会伪装成"模型不可用"，让人往网络方向排查）。
     """
     configs: dict[str, TierConfig] = {}
+    # 缓存命中价是**全局**一项（.env 里只有 MODEL_CACHE_HIT_INPUT_PRICE_PER_1M，
+    # 没有分等级的版本），故三个等级共用同一个值。
+    cache_hit_price = float(_tier_field(settings, "model_cache_hit_input_price_per_1m") or 0.0)
     for tier in MODEL_TIERS:
         lowered = tier.lower()
         model = _tier_field(settings, f"model_{lowered}") or ""
@@ -62,6 +65,7 @@ def read_tier_configs(settings: Any) -> dict[str, TierConfig]:
             reasoning=reasoning,
             price_input_per_1m=price_in,
             price_output_per_1m=price_out,
+            price_cache_hit_input_per_1m=cache_hit_price,
         )
     return configs
 
@@ -118,9 +122,18 @@ class Router:
         """
         return {tier: cfg.model for tier, cfg in sorted(self.tiers.items())}
 
-    def estimate_cost(self, tier: str, tokens_input: int, tokens_output: int) -> float:
+    def estimate_cost(
+        self,
+        tier: str,
+        tokens_input: int,
+        tokens_output: int,
+        *,
+        cached_tokens: int = 0,
+    ) -> float:
         """按等级单价估算成本（元）。阶段 07 的 Pre-check 会用它。"""
-        return self.tier_config(tier).estimate_cost(tokens_input, tokens_output)
+        return self.tier_config(tier).estimate_cost(
+            tokens_input, tokens_output, cached_tokens=cached_tokens
+        )
 
     # ---------- 调用 ----------
 
@@ -153,7 +166,13 @@ class Router:
         result.tier = target.tier
 
         config = self.tiers[target.tier]
-        result.cost = config.estimate_cost(result.tokens_input, result.tokens_output)
+        # 命中缓存的输入 token 单独计价（见 TierConfig.estimate_cost 的说明）。
+        # 不传的话命中部分会按全额输入价计费，账单被高估。
+        result.cost = config.estimate_cost(
+            result.tokens_input,
+            result.tokens_output,
+            cached_tokens=getattr(result, "cached_tokens", 0) or 0,
+        )
 
         if record:
             self._record(result, project_id=project_id, run_id=run_id, call_id=call_id)

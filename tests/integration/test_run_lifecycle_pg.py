@@ -848,6 +848,220 @@ def test_persistence_failure_ends_the_run_as_failed_not_queued(session, ctx, wor
 
 
 # ============================================================
+# 回归：Post-check 必须把花费累加回 Project.budget_used
+# ============================================================
+
+
+def test_worker_accumulates_project_budget_used(session, ctx):
+    """Post-check（计划第 650–652 行）：Run 的真实花费必须累加回项目。
+
+    此前 `Project.budget_used` **永远是 0** —— 没有任何代码写它。
+    后果是项目预算永远花不完，"预算不足就拒绝创建"那道闸门即使接上
+    也永远不触发。这也解释了为什么这条验收以前只在单测里成立。
+    """
+    from unittest.mock import patch
+
+    from sqlalchemy import text as _text
+
+    from app.db import SessionLocal
+    from app.tasks.analysis import _execute
+
+    project, source, runs = ctx
+
+    # 必须有一条 error 级事件：0 事件会判 L0（纯规则、不调模型），
+    # 那样就没有花费可累加，测的就不是 Post-check 了。
+    from app.models.event import Event
+    from app.repositories.event import EventRepository
+
+    EventRepository(session).add(
+        project.id,
+        Event(
+            project_id=project.id,
+            source_id=source.id,
+            timestamp=T0,
+            severity="high",
+            event_type="log",
+            message="kernel: Out of memory: Kill process 1234",
+        ),
+    )
+    run_id, _, _ = create_run(runs, _request(project, source))
+    session.commit()
+
+    class _FakeSettings:
+        model_provider_base_url = "https://example.invalid"
+        secret_key = "test-secret"
+        default_timezone = "Asia/Shanghai"
+        data_dir = "./data"
+        model_l1 = model_l2 = model_l3 = "test-model"
+        model_l1_reasoning = model_l2_reasoning = model_l3_reasoning = "off"
+        model_l1_price_input_per_1m = model_l1_price_output_per_1m = 1.0
+        model_l2_price_input_per_1m = model_l2_price_output_per_1m = 1.0
+        model_l3_price_input_per_1m = model_l3_price_output_per_1m = 1.0
+        model_cache_hit_input_price_per_1m = 0.0
+
+    class _StubResult:
+        tokens_input = 1000
+        tokens_output = 500
+        cost = 0.25
+
+        def __init__(self) -> None:
+            self.parsed = {"insights": [], "knowledge_candidates": []}
+
+    class _StubRouter:
+        def generate(self, **kwargs):
+            return _StubResult()
+
+    with patch("app.config.get_settings", return_value=_FakeSettings()), patch(
+        "app.gateways.router.build_router", return_value=_StubRouter()
+    ):
+        _execute(
+            session_factory=SessionLocal,
+            run_id=run_id,
+            project_id=project.id,
+            start_tier="L2",
+        )
+
+    fresh = SessionLocal()
+    try:
+        used = fresh.execute(
+            _text("SELECT budget_used FROM projects WHERE id = :i"), {"i": project.id}
+        ).scalar_one()
+        cost = fresh.execute(
+            _text("SELECT cost_actual FROM agent_runs WHERE id = :i"), {"i": run_id}
+        ).scalar_one()
+    finally:
+        fresh.close()
+
+    assert float(used) == float(cost) > 0, (
+        f"项目已用预算应等于这次 Run 的实际花费：used={used} cost={cost}"
+    )
+
+
+# ============================================================
+# 回归：Mid-check 到顶 → partial_success（而不是 failed / completed）
+# ============================================================
+
+
+def test_mid_check_stops_at_policy_limit_and_keeps_partial_results(session, ctx):
+    """策略到顶必须收成 `partial_success` + 真实原因，且**已花的钱照记**。
+
+    计划第 646–648 行：Mid-check 在每次模型调用前检查，到顶就"停止昂贵步骤，
+    状态置 partial_success，返回已完成部分"。此前 `CostController` 在真实路径里
+    根本没被构造，`Router.generate` 前面没有任何检查 —— 这些上限只存在于配置里。
+
+    这条同时钉住两个容易做错的点：
+      - 到顶**不是** failed（否则已经有结论的 Run 看起来一无所有）；
+      - 抛异常之前要先把已拿到的结论落库，否则"返回已完成部分"变成"全丢"。
+    """
+    from unittest.mock import patch
+
+    from sqlalchemy import text as _text
+
+    from app.policy.store import get_policy_store, reset_policy_store
+    from app.tasks.analysis import _execute
+
+    project, source, runs = ctx
+
+    # 一条 error 级事件 → 复杂度非 L0 → 会真的走模型这一侧
+    from app.models.event import Event
+    from app.repositories.event import EventRepository
+
+    EventRepository(session).add(
+        project.id,
+        Event(
+            project_id=project.id,
+            source_id=source.id,
+            timestamp=T0,
+            severity="high",
+            event_type="log",
+            message="kernel: Out of memory: Kill process 1234",
+        ),
+    )
+    run_id, _, _ = create_run(runs, _request(project, source))
+    session.commit()
+
+    class _FakeSettings:
+        model_provider_base_url = "https://example.invalid"
+        secret_key = "test-secret"
+        default_timezone = "Asia/Shanghai"
+        data_dir = "./data"
+        model_l1 = model_l2 = model_l3 = "test-model"
+        model_l1_reasoning = model_l2_reasoning = model_l3_reasoning = "off"
+        model_l1_price_input_per_1m = model_l1_price_output_per_1m = 1.0
+        model_l2_price_input_per_1m = model_l2_price_output_per_1m = 1.0
+        model_l3_price_input_per_1m = model_l3_price_output_per_1m = 1.0
+        model_cache_hit_input_price_per_1m = 0.0
+
+    calls: list[str] = []
+
+    class _StubResult:
+        tokens_input = 1000
+        tokens_output = 500
+        cost = 0.25  # 远超下面设定的 0.0001 上限
+
+        def __init__(self) -> None:
+            # 故意给一个**不存在**的 event_id：证据校验会要求重试，
+            # 于是链路会发起第二轮调用 —— 而那一轮会先撞上 Mid-check。
+            self.parsed = {
+                "insights": [
+                    {
+                        "type": "inference",
+                        "severity": "medium",
+                        "confidence": 0.5,
+                        "title": "疑似 OOM",
+                        "summary": "OOM 迹象",
+                        "evidence_ids": ["999999"],
+                        "reasoning": "关键词命中",
+                    }
+                ],
+                "knowledge_candidates": [],
+            }
+
+    class _StubRouter:
+        def generate(self, **kwargs):
+            calls.append(kwargs.get("tier"))
+            return _StubResult()
+
+    # 单次 Run 上限压到极低：第一次调用之后就必然到顶
+    reset_policy_store()
+    get_policy_store().set_override(project.id, run_max_cost=0.0001)
+    try:
+        with (
+            patch("app.config.get_settings", return_value=_FakeSettings()),
+            patch("app.gateways.router.build_router", return_value=_StubRouter()),
+        ):
+            out = _execute(
+                session_factory=SessionLocal,
+                run_id=run_id,
+                project_id=project.id,
+                start_tier="L2",
+            )
+    finally:
+        reset_policy_store()  # 覆盖是进程内的，别漏给别的测试
+
+    assert out["status"] == enums.AGENT_RUN_PARTIAL_SUCCESS, (
+        f"策略到顶应收成 partial_success（不是 failed/completed），实际 {out['status']}"
+    )
+    assert len(calls) == 1, f"到顶后不该再调模型，实际调了 {calls}"
+
+    fresh = SessionLocal()
+    try:
+        status, metadata, cost = fresh.execute(
+            _text("SELECT status, run_metadata, cost_actual FROM agent_runs WHERE id = :i"),
+            {"i": run_id},
+        ).one()
+    finally:
+        fresh.close()
+
+    assert status == enums.AGENT_RUN_PARTIAL_SUCCESS
+    assert metadata.get("stop_reason") == "budget_exceeded", (
+        f"中断原因必须是真正的原因（budget_exceeded），实际 {metadata.get('stop_reason')}"
+    )
+    # 钱是真花了：到顶也照记
+    assert float(cost) > 0
+
+
+# ============================================================
 # 回归：失败 / 不完整必须能「重新分析」（计划第 912 行、验收第 919 行）
 # ============================================================
 

@@ -10,9 +10,33 @@ V1 不建策略表（计划第 356 行）。覆盖值放在 `Project.status` 之
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from app.policy.policy import DEFAULT_POLICY, PolicyOverrides, RunPolicy
+
+
+def policy_from_settings() -> RunPolicy:
+    """默认策略从 `.env` 读，而不是只认 dataclass 里的硬编码值。
+
+    `DEFAULT_RUN_MAX_COST` 一直是"声明了但没人读"：用户在 .env 里把单次上限
+    调成 0.05，代码仍按硬编码的 0.30 放行。它是一道**花钱的闸门**，
+    静默失效的方向恰好是"多花钱"。
+
+    取值**负数**会在首次使用时由 `RunPolicy.__post_init__` 直接报错 ——
+    配错了就该立刻响，而不是等跑出账单。
+    `0` 是合法值，语义为"这个 Run 一分钱都不许花"（pre-check 会直接拒绝创建），
+    这是有意保留的开关，不是漏校验。
+
+    读配置用 `getattr` 兜底：测试与部分调用方会注入"只带所需字段"的
+    settings 替身，缺这一项时退回策略自己的默认值，而不是抛 AttributeError
+    （那会让人以为策略写错了，其实是替身不完整）。
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    raw = getattr(settings, "default_run_max_cost", DEFAULT_POLICY.run_max_cost)
+    return replace(DEFAULT_POLICY, run_max_cost=float(raw))
 
 
 class ProjectPolicyStore:
@@ -48,10 +72,10 @@ _store: ProjectPolicyStore | None = None
 
 
 def get_policy_store() -> ProjectPolicyStore:
-    """进程内单例。"""
+    """进程内单例。默认策略从配置构建（见 `policy_from_settings`）。"""
     global _store
     if _store is None:
-        _store = ProjectPolicyStore()
+        _store = ProjectPolicyStore(default=policy_from_settings())
     return _store
 
 

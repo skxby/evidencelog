@@ -76,6 +76,23 @@ class CreateProjectRequest(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     budget_total: float = Field(default=0.0, ge=0)
 
+    @field_validator("budget_total")
+    @classmethod
+    def _budget_granularity(cls, value: float) -> float:
+        """预算只允许 0 或 ≥ 0.0001，中间那一段**明确拒绝**。
+
+        `projects.budget_total` 是 `Numeric(12,4)`，比 0.0001 更小的值会被
+        数据库四舍五入成 0.0000 —— 而 0 的语义是"未设预算（不拦）"。
+        于是 `0.00001` 这种"我想卡得很死"的输入会**静默变成不卡**，
+        方向正好是危险的那一边（多花钱）。宁可报错说清楚。
+        """
+        if 0 < value < 0.0001:
+            raise ValueError(
+                f"budget_total={value} 太小：金额精度是 4 位小数（最小 0.0001）；"
+                "填 0 表示不设预算上限"
+            )
+        return value
+
 
 class ProjectResponse(StrictModel):
     id: int

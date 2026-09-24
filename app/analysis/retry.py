@@ -24,6 +24,7 @@ from typing import Any, TypeVar
 from app.analysis.idempotency import ErrorKind, classify_error, is_retryable
 from app.gateways.base import MODEL_TIERS
 from app.policy import STOP_MODEL_UNAVAILABLE
+from app.policy.cost_controller import StopExecution
 from app.utils.observability import get_logger
 
 T = TypeVar("T")
@@ -275,6 +276,15 @@ def call_with_fallback(
             )
 
         kind = classify_error(outcome.last_error) if outcome.last_error else ErrorKind.UNKNOWN
+        # `StopExecution` 自带计划第 660 行的 stop_reason 词汇
+        # （budget_exceeded / token_limit / runtime_limit / call_limit）。
+        # 若一律用错误分类（"budget"）当 stop_reason，就和计划里的取值对不上：
+        # 判"该不该收成 partial_success"的那一处按计划词汇比对，
+        # 结果永远匹配不上 —— Run 会被报成 failed，而它其实是"到点收工、已有结论"。
+        stop_reason = kind
+        if isinstance(outcome.last_error, StopExecution):
+            stop_reason = outcome.last_error.reason
+
         attempts.append(
             FallbackAttempt(
                 tier=tier,
@@ -292,7 +302,7 @@ def call_with_fallback(
                 # 如实回报**真正的原因**（如 input / budget / auth），
                 # 不要一律写成 model_unavailable —— 那会把"日志格式不认识"
                 # 报成"模型不可用"，让人往完全错误的方向排查。
-                stop_reason=kind,
+                stop_reason=stop_reason,
                 attempts=attempts,
             )
 

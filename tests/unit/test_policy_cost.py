@@ -405,3 +405,78 @@ def test_policy_store_singleton():
     reset_policy_store()
     assert get_policy_store() is get_policy_store()
     reset_policy_store()
+
+
+# ============================================================
+# 回归：声明了却没人读的配置（本轮扫出来的三处）
+# ============================================================
+
+
+def test_default_run_max_cost_env_actually_drives_the_policy(monkeypatch):
+    """`DEFAULT_RUN_MAX_COST` 必须真的决定单次上限。
+
+    此前它是个摆设：`get_policy_store()` 用的是 dataclass 里硬编码的 0.30，
+    env 改成 0.05 也照样按 0.30 放行 —— 而它是一道**花钱的闸门**，
+    失效方向恰好是"多花钱"。
+
+    注意 `get_settings` 是 `lru_cache` 的：改了环境变量必须清缓存，
+    否则读到的是进程启动时那份（这个坑本身也值得记住 —— 它会让
+    "配置改了没生效"的调查白跑一轮）。
+    """
+    from app.config import get_settings
+    from app.policy.store import policy_from_settings
+
+    monkeypatch.setenv("DEFAULT_RUN_MAX_COST", "0.05")
+    get_settings.cache_clear()
+    try:
+        assert policy_from_settings().run_max_cost == pytest.approx(0.05)
+
+        monkeypatch.setenv("DEFAULT_RUN_MAX_COST", "-1")
+        get_settings.cache_clear()
+        with pytest.raises(PolicyError):
+            policy_from_settings()
+    finally:
+        get_settings.cache_clear()  # 别把改动留给后面的测试
+
+
+def test_cache_hit_tokens_are_cheaper_than_full_price():
+    """缓存命中的输入 token 必须按命中价计，而不是全额输入价。
+
+    `MODEL_CACHE_HIT_INPUT_PRICE_PER_1M` 同样一直是空头承诺：`cached_tokens`
+    被记了下来、却从没进过成本公式，`TierConfig.estimate_cost` 的 docstring
+    甚至写着"阶段 07 的成本控制会在此基础上区分命中/未命中"。
+    高估的成本会喂给 Mid-check 的「已花成本 ≥ 上限」，让 Run 提前被砍。
+    """
+    config = TierConfig(
+        tier="L1", model="m", reasoning="off",
+        price_input_per_1m=0.5, price_output_per_1m=2.0,
+        price_cache_hit_input_per_1m=0.02,
+    )
+    full = config.estimate_cost(1000, 500)
+    half = config.estimate_cost(1000, 500, cached_tokens=500)
+    all_hit = config.estimate_cost(1000, 500, cached_tokens=1000)
+
+    assert all_hit < half < full, "命中越多应当越便宜"
+    # 输出 token 的价钱与命中无关，不能被折扣掉
+    output_only = 500 / 1_000_000 * 2.0
+    assert all_hit == pytest.approx(1000 / 1_000_000 * 0.02 + output_only)
+
+
+def test_unset_cache_price_does_not_silently_discount():
+    """没配命中价时按正常输入价计 —— **不做静默折扣**。
+
+    悄悄按更便宜的价算，会让账单看起来比实际低，方向正好是危险的
+    （和"失败必须明确"同一条道理）。
+    """
+    config = TierConfig("L1", "m", "off", 0.5, 2.0)  # 没给命中价
+    assert config.estimate_cost(1000, 500, cached_tokens=1000) == pytest.approx(
+        config.estimate_cost(1000, 500)
+    )
+
+
+def test_cached_tokens_larger_than_input_is_clamped():
+    """供应商若给出不合理的命中数，不能算出负数成本。"""
+    config = TierConfig("L1", "m", "off", 0.5, 2.0, price_cache_hit_input_per_1m=0.02)
+    assert config.estimate_cost(1000, 0, cached_tokens=99999) == pytest.approx(
+        1000 / 1_000_000 * 0.02
+    )
