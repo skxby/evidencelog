@@ -16,11 +16,41 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from app.config import get_settings
 from app.db import SessionLocal, engine
+from app.gateways.base import ConfigurationError
+from app.gateways.router import read_tier_configs
 from app.main import app
 
 pytestmark = pytest.mark.integration
 UTC = timezone.utc
+
+
+def _require_cost_gate_readable() -> None:
+    """确认成本闸门**能构造出来** —— 这是"预算不足拒绝创建"的前提。
+
+    `build_cost_controller` 读不到型号会返回 `None`，端点上那道 Pre-check 就
+    整个缺席，创建一律 202 放行。真机核验（2026-09-24）在 CI 上就是这么栽的：
+    同一份代码本地 402、CI 202，只差 CI 没配 MODEL_L1/L2/L3。
+
+    这里**显式失败**而不是 `skip`：略过等于这条真机验收从来没跑过
+    （项目红线下不允许用跳过代替通过）。
+    """
+    try:
+        configs = read_tier_configs(get_settings())
+    except ConfigurationError as exc:
+        pytest.fail(
+            f"型号没配齐，成本闸门无法构造，这条真机验收无从执行：{exc}；"
+            "请按 .env.example 补齐 MODEL_L1/L2/L3（CI 见 .github/workflows/ci.yml）"
+        )
+    if all(
+        config.price_input_per_1m <= 0 and config.price_output_per_1m <= 0
+        for config in configs.values()
+    ):
+        pytest.fail(
+            "单价全是 0：估算成本恒为 0，Pre-check 会一路放行（闸门在却不生效）；"
+            "请按 .env.example 补 MODEL_L1/L2/L3_PRICE_*_PER_1M"
+        )
 
 
 @pytest.fixture()
@@ -451,6 +481,7 @@ def test_create_run_is_refused_when_budget_is_insufficient(client: TestClient):
     **没人构造过它**，所以真机上可以拿一个预算见底的项目一直发起分析。
     现在 Pre-check 接在创建端点上：402（不是 422 —— 这不是参数写错，是钱不够）。
     """
+    _require_cost_gate_readable()
     headers = _register(client)
     # 预算小到连一次 L3 调用都覆盖不了（Pre-check 的估计约 ¥0.018，还叠加 10% 安全边际）。
     # 注意金额精度是 4 位小数：比 0.0001 更小的值会被数据库四舍五入成 0，

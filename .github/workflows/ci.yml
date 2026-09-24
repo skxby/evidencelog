@@ -45,6 +45,23 @@ jobs:
       SECRET_KEY: ci-only-secret-not-used-anywhere-else
       # 刻意不配 MODEL_PROVIDER_API_KEY：CI 里不该有真实密钥。
       # 需要它才能跑的用例（test_gateway_live.py）本来就是默认跳过的。
+      #
+      # 但**型号与单价必须配**（都不是密钥，值取自 .env.example）：
+      # `build_cost_controller` 读不到型号就返回 None，端点上那道 Pre-check
+      # 直接缺席 —— 于是"预算不足拒绝创建"这条真机验收在 CI 里只会拿到 202。
+      # 2026-09-24 实测：同一份代码本地 402、CI 202，差别只在这几个变量。
+      MODEL_L1: deepseek-flash
+      MODEL_L2: deepseek-flash
+      MODEL_L3: deepseek-flash
+      MODEL_L1_REASONING: "off"
+      MODEL_L2_REASONING: low
+      MODEL_L3_REASONING: high
+      MODEL_L1_PRICE_INPUT_PER_1M: "1"
+      MODEL_L1_PRICE_OUTPUT_PER_1M: "4"
+      MODEL_L2_PRICE_INPUT_PER_1M: "1"
+      MODEL_L2_PRICE_OUTPUT_PER_1M: "4"
+      MODEL_L3_PRICE_INPUT_PER_1M: "1"
+      MODEL_L3_PRICE_OUTPUT_PER_1M: "4"
 
     steps:
       - uses: actions/checkout@v4

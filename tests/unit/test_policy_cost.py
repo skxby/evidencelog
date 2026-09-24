@@ -650,3 +650,95 @@ def test_peak_estimate_can_reject_a_run_that_off_peak_would_allow():
     )
     assert off.pre_check("L3").allowed is True
     assert on.pre_check("L3").allowed is False, "高峰价下预算不够，必须拒绝创建"
+
+
+# ============================================================
+# 回归（2026-09-24 CI 实测）：闸门"缺席"与"放行"必须能分辨
+# ============================================================
+
+
+def _wiring_settings(*, with_model: bool, with_price: bool):
+    from types import SimpleNamespace
+
+    model = "some-model" if with_model else ""
+    price = 1.0 if with_price else 0.0
+    return SimpleNamespace(
+        model_l1=model,
+        model_l2=model,
+        model_l3=model,
+        model_l1_reasoning="off",
+        model_l2_reasoning="low",
+        model_l3_reasoning="high",
+        model_l1_price_input_per_1m=price,
+        model_l1_price_output_per_1m=price,
+        model_l2_price_input_per_1m=price,
+        model_l2_price_output_per_1m=price,
+        model_l3_price_input_per_1m=price,
+        model_l3_price_output_per_1m=price,
+        default_timezone="Asia/Shanghai",
+    )
+
+
+def _wiring_store():
+    from types import SimpleNamespace
+
+    from app.policy.policy import RunPolicy
+
+    # 不传 project：用 store.default 即可，避免依赖数据库会话
+    return SimpleNamespace(default=RunPolicy())
+
+
+def test_missing_model_config_warns_before_dropping_the_gate(caplog):
+    """拿不到型号时闸门会返回 None —— 响应与"放行"一样，必须留日志。
+
+    CI 实测（2026-09-24）：同一份代码本地 402 拒绝、CI 202 放行，
+    差别只在 CI 没配 MODEL_L1/L2/L3。若这里不告警，真机上只看响应
+    根本分不出"闸门拦了"和"闸门压根没接"。
+    """
+    import logging
+
+    from app.policy.wiring import build_cost_controller
+
+    with caplog.at_level(logging.WARNING):
+        controller = build_cost_controller(
+            settings=_wiring_settings(with_model=False, with_price=False),
+            policy_store=_wiring_store(),
+        )
+
+    assert controller is None
+    assert "成本闸门未接入" in caplog.text
+
+
+def test_all_zero_prices_warn_that_the_gate_cannot_trip(caplog):
+    """单价全 0 时闸门"在"却不生效：估算成本恒为 0，预检不会拦任何 Run。
+
+    自建/免费端点填 0 是合理的，所以只告警不拦 —— 但不能不吭声。
+    """
+    import logging
+
+    from app.policy.wiring import build_cost_controller
+
+    with caplog.at_level(logging.WARNING):
+        controller = build_cost_controller(
+            settings=_wiring_settings(with_model=True, with_price=False),
+            policy_store=_wiring_store(),
+        )
+
+    assert controller is not None, "型号配了就该构造出闸门"
+    assert "单价全是 0" in caplog.text
+
+
+def test_configured_prices_do_not_warn(caplog):
+    """混用付费与自建型号时（至少一档有价）不该告警：闸门对贵的那档有效。"""
+    import logging
+
+    from app.policy.wiring import build_cost_controller
+
+    with caplog.at_level(logging.WARNING):
+        controller = build_cost_controller(
+            settings=_wiring_settings(with_model=True, with_price=True),
+            policy_store=_wiring_store(),
+        )
+
+    assert controller is not None
+    assert "成本闸门" not in caplog.text

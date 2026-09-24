@@ -13,11 +13,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.gateways.base import ConfigurationError
 from app.policy.cost_controller import CostController
 from app.policy.policy import RunPolicy
+
+logger = logging.getLogger(__name__)
 
 
 def build_cost_controller(
@@ -33,6 +36,8 @@ def build_cost_controller(
     返回 `None` 而不是抛错，是为了**不破坏降级路径**：没配型号时本来就调不了
     模型（链路会退到纯规则 L0 报告），此时既估不出成本、也不会产生花费，
     拦下创建反而是错的 —— 用户会看到"建不了分析"，而不是"模型没配好"。
+    代价是"闸门缺席"和"闸门放行"在响应上长得一样，所以这条降级必须**留日志**
+    （见下方 warning；CI 上就靠这个变量差异复现过 402 / 202 的分歧）。
 
     `Project.budget_total <= 0` 视为**未设预算**（不拦）。理由是 `budget_total`
     在 schema 里的默认值就是 0，若把 0 当"预算为零"，那么所有没显式填预算的
@@ -51,9 +56,23 @@ def build_cost_controller(
 
     try:
         tier_configs = read_tier_configs(settings)
-    except ConfigurationError:
-        # 型号没配齐：估不出成本，也不会花钱，交给既有的降级链处理
+    except ConfigurationError as exc:
+        # 型号没配齐：估不出成本，也不会花钱，交给既有的降级链处理。
+        # 但**必须留痕**：闸门缺席与"闸门判定放行"的响应是一样的（都是 202），
+        # 真机上只看响应分不出来。CI 实测（2026-09-24）正是踩了这个：
+        # 同一份代码本地 402 拒绝、CI 202 放行，只因为 CI 没配型号。
+        logger.warning("成本闸门未接入：型号未配置（%s）；本次创建不做预算预检", exc)
         return None
+
+    if _no_prices_at_all(tier_configs):
+        # 单价全 0 时估出的成本恒为 0，三道预算闸门都会一路放行、
+        # `budget_used` 也永远是 0 —— 闸门"在"却不生效。
+        # 自建/免费端点单价填 0 是合理的，所以这里只告警不拦，
+        # 但绝不能不吭声。
+        logger.warning(
+            "成本闸门单价全是 0：估算成本恒为 0，预算类 Pre-check 不会拦任何 Run"
+            "（自建/免费端点可忽略；付费端点请补 MODEL_L1/L2/L3_PRICE_*_PER_1M）"
+        )
 
     total: float | None = None
     used = 0.0
@@ -79,6 +98,19 @@ def build_cost_controller(
         # 高峰时段的预检会低估一倍，该拦的 Run 就放过去了（真机核验 2026-09-24）。
         peak_now=_is_peak_now(settings),
         clock=clock,
+    )
+
+
+def _no_prices_at_all(tier_configs: dict[str, Any]) -> bool:
+    """三个等级的进/出单价是否**全都**是 0（= 估不出成本）。
+
+    只要有一个等级有价就返回 False：混用付费与自建型号是常见配法，
+    那时闸门对贵的那一档仍然是有效的。
+    """
+    return all(
+        float(getattr(config, "price_input_per_1m", 0.0) or 0.0) <= 0
+        and float(getattr(config, "price_output_per_1m", 0.0) or 0.0) <= 0
+        for config in tier_configs.values()
     )
 
 

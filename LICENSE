@@ -19,11 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-关于仓库内第三方材料的说明：
-
-- `logs/` 下的日志语料来自公开数据集（loghub、elastic/examples），出处与许可
-  见 `logs/README.md`；它们仅用于解析率与脱敏误伤的基线测量。
-- 本项目代码（`app/`、`tests/`、`.dsh/`、迁移与编排文件）按上述 MIT 条款授权。

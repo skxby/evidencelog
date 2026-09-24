@@ -290,6 +290,7 @@ E2E      容器全栈 16/16；真实调用 1607/3058 tokens、¥0.0138、7 条�
 | web 起不来，日志显示连不上数据库 | 确认 postgres 是 `healthy`；`docker compose logs postgres` |
 | 模型分析总是降级成纯规则报告 | `.env` 里 `MODEL_PROVIDER_API_KEY` 是否为空／是否有效；此时 Run 会是 `partial_success` + `model_unavailable`（不再假装"没发现异常"） |
 | 报告里没有结论 | 看 Run 状态：`partial_success`/`failed` 会写明中断原因；L0（正常日志）本就无异常结论 |
+| 明明预算不够，发起分析却成功了（本该 402） | 看日志有没有 `成本闸门未接入：型号未配置` / `成本闸门单价全是 0`：这两种情况下 Pre-check 要么缺席、要么估出 0 元，**都会放行**。按 `.env.example` 补齐 `MODEL_L1/L2/L3` 与单价即恢复（型号名与单价不是密钥；CI 里就配在 `.github/workflows/ci.yml`） |
 | 想确认某次分析到底做了什么 | 打开 `/runs/<id>/detail?project_id=<pid>`，页面会复述阶段、花费、结论与证据 |
 | 端口被占用 | 改 compose 里的端口映射；注意只绑 `127.0.0.1` |
 | Celery 在 Windows 卡住 | 直跑时必须 `-P solo`（compose 里已加） |

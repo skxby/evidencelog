@@ -18,6 +18,11 @@ pytest -q                     # 全量测试（需要一个真实的 PostgreSQL/
 不想用 Docker 跑应用、只想跑测试：`docker compose up -d postgres redis`，
 再按 README 第 6 节建 `.venv` 装依赖。
 
+`.env` 里除了 Key，**型号与单价也要照 `.env.example` 留着**（型号名与单价不是密钥）：
+少了它们，成本控制器根本构造不出来，`test_create_run_is_refused_when_budget_is_insufficient`
+这条"真机口径"验收就无从执行 —— 它会**显式报错并告诉你要补哪几个变量**，
+而不是悄悄跳过（2026-09-24 CI 上就是这么发现的：同一份代码本地 402、CI 202 放行）。
+
 ---
 
 ## 二、改动前必须先读的两份东西
