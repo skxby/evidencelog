@@ -62,6 +62,10 @@ V1 是个人全栈、单领域、**只读**的日志分析 Runtime：上传日�
 .venv\Scripts\python.exe .dsh\demo_setup.py     # 建好演示账号 + 一份已跑完的报告，并打印可点的链接
 ```
 
+这条命令建出来的演示账号是 **`demo@evidencelog.local` / `evidencelog-demo-2026`**
+（只在你自己这台机器的数据库里，换个环境就不存在；想用自己的账号直接在页面上注册，
+口令 8–72 位即可）。
+
 下面是手工版（Linux / macOS / 想自己控制每一步时用）：
 
 ```bash

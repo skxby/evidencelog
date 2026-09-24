@@ -71,6 +71,7 @@ echo   conclusions, each one backed by evidence.
 echo.
 echo   Optional prepared demo ^(needs host Python, README section 6^):
 echo       .venv\Scripts\python.exe .dsh\demo_setup.py
+echo       then log in as:  demo@evidencelog.local / evidencelog-demo-2026
 echo.
 echo   Stop:  double-click the stop script   or run:  docker compose down
 echo   Rebuild after code changes:  docker compose up -d --build
