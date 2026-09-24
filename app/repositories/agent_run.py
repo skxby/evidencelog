@@ -51,9 +51,7 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
         )
         return self.add(project_id, run)
 
-    def find_reusable(
-        self, project_id: int, idempotency_key: str
-    ) -> AgentRun | None:
+    def find_reusable(self, project_id: int, idempotency_key: str) -> AgentRun | None:
         """找可复用的成功 Run（计划第 703 行：不重复执行、不重复计费）。
 
         只有 `completed` 才算可复用：`partial_success` 的结果本身不完整，
@@ -123,14 +121,13 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
             AgentRun.status == enums.AGENT_RUN_RUNNING,
             # 心跳与开始时间都早于截止时刻（心跳为空则看开始时间）
             (AgentRun.last_heartbeat < deadline)
-            | (
-                AgentRun.last_heartbeat.is_(None)
-                & (AgentRun.started_at < deadline)
-            ),
+            | (AgentRun.last_heartbeat.is_(None) & (AgentRun.started_at < deadline)),
         )
         if project_id is not None:
             statement = statement.where(AgentRun.project_id == project_id)
-        return list(self.session.execute(statement.order_by(AgentRun.id)).scalars().all())
+        return list(
+            self.session.execute(statement.order_by(AgentRun.id)).scalars().all()
+        )
 
     def reclaim_zombies(
         self,
@@ -204,7 +201,14 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
         if target in enums.AGENT_RUN_TERMINAL_STATES:
             run.finished_at = datetime.now(timezone.utc)
         if metadata is not None:
-            run.run_metadata = metadata
+            # **合并**而不是覆盖。`run_metadata` 是累积容器：创建 Run 时写进去的
+            # trace_id（计划第 928 行）与策略快照（第 356 行）必须活到终态之后。
+            #
+            # 覆盖式写入的后果实测过：Worker 一跑完，Run 上的 trace_id 就没了 ——
+            # "事后用 trace_id 把这次分析的日志全捞出来"直接落空。更阴险的是
+            # 它只在**分析真的跑完**时才发生：Run 卡在 queued 时 trace_id 反而还在，
+            # 于是"越正常越丢"，看单条记录根本发现不了。
+            run.run_metadata = {**(run.run_metadata or {}), **metadata}
         if error is not None:
             run.error = error
         return True
@@ -226,7 +230,10 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
         if phase_history is not None:
             run.phase_history = phase_history
         return True
-    def append_model_call(self, project_id: int, run_id: int, call: dict[str, Any]) -> bool:
+
+    def append_model_call(
+        self, project_id: int, run_id: int, call: dict[str, Any]
+    ) -> bool:
         """向 `model_calls` 追加一条记录。
 
         用行级锁串行化，防止并发追加时后写覆盖先写。
@@ -246,7 +253,9 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
         run = self.get(project_id, run_id)
         return list(run.model_calls or []) if run is not None else []
 
-    def append_tool_usage(self, project_id: int, run_id: int, usage: dict[str, Any]) -> bool:
+    def append_tool_usage(
+        self, project_id: int, run_id: int, usage: dict[str, Any]
+    ) -> bool:
         """把一次工具执行记录追加到 `tool_usage`（阶段 05 验收：执行结果可记录到 Run）。
 
         `tool_usage` 是 JSONB，故写入前先确认可序列化：工具输出里可能混入

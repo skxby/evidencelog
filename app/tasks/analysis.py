@@ -21,15 +21,25 @@ logger = get_logger(__name__)
 
 @celery_app.task(name="app.tasks.analysis.execute_run", bind=True)
 def execute_run_task(
-    self: Any, *, run_id: int, project_id: int, start_tier: str = "L2"
+    self: Any,
+    *,
+    run_id: int,
+    project_id: int,
+    start_tier: str = "L2",
+    trace_id: str | None = None,
 ) -> dict[str, Any]:
     """执行一次分析 Run。
 
     Windows 上 worker 需加 `-P solo`（见 AGENTS.md 技术栈）。
+
+    `trace_id` 由发起请求的那次 HTTP 调用传进来（见 `_dispatch`）：
+    contextvars **不跨进程**，不显式传的话 worker 会另起一个 trace_id，
+    "同一条 trace 串起请求与执行"就只剩前半截 —— 拿着 Run 详情里的
+    trace_id 去 grep，worker 那半边一条都捞不到。传了就沿用同一个。
     """
     # 任务也在同一个 trace 下：这样"HTTP 请求 → 入队 → Worker 执行"
     # 的日志能被同一个 trace_id 串起来（计划第 928 行）
-    with bind_run_context(run_id=run_id, project_id=project_id):
+    with bind_run_context(trace_id=trace_id, run_id=run_id, project_id=project_id):
         return _execute(
             session_factory=SessionLocal,
             run_id=run_id,
@@ -63,6 +73,9 @@ def _execute(
         # （进程名在其中），于是 analyzer 全部判定"无异常"、复杂度落到 L0、
         # 模型一次都没被调用，Run 却显示 completed。
         events = EventRepository(session).pipeline_events(project_id)
+        # 事件条数是排障的第一现场：0 条事件会让整条链路"成功地产出零结论"，
+        # 而这个数字是唯一能一眼看出来的证据
+        logger.info("run_events_loaded", event_count=len(events))
 
         executor = RunExecutor(run_repository=runs)
         captured: dict[str, Any] = {}
@@ -119,6 +132,19 @@ def _execute(
                 run_id=run_id,
             )
             captured["result"] = result
+            # 关键节点留痕：**这才是 trace_id 能派上用场的地方**。
+            # 计划第 928 行要求"同一条 trace 串起请求与执行"，可早先整条成功路径
+            # 一条日志都不打 —— 于是拿 trace_id 去 grep 什么都捞不到，
+            # "有 trace" 只是形式上的。等级判定、候选异常、模型调用与花费
+            # 是排障时最先要看的三件事，全部记上。
+            logger.info(
+                "pipeline_done",
+                tier=result.tier,
+                anomaly_count=len(result.anomalies),
+                anomaly_types=sorted({str(a.get("type")) for a in result.anomalies}),
+                context_tokens=result.context_tokens,
+                model_attempts=len(result.model_attempts),
+            )
             # 落库必须在**这里**、也就是"状态机写终态之前"完成。
             #
             # 放在 execute() 之后是不行的：那时 Run 已经是 completed/failed 这样的
@@ -129,6 +155,7 @@ def _execute(
             captured["persisted"] = _persist_result(
                 session, project_id=project_id, run_id=run_id, run=run, result=result
             )
+            logger.info("insights_persisted", **captured["persisted"])
             return result
 
         def rules_only() -> Any:
@@ -159,6 +186,7 @@ def _execute(
                 rules_only_fallback=rules_only,
             )
         except CancelledError:
+            logger.info("run_cancelled", run_id=run_id)
             return {"run_id": run_id, "status": "cancelled"}
 
         # 落库已在 attempt_tier 内完成（见那里的说明）。这里只取结果：
@@ -196,6 +224,21 @@ def _execute(
             metadata_extra["context_tokens"] = int(result.context_tokens)
             metadata_extra["model_attempts"] = result.model_attempts
         run.run_metadata = {**(run.run_metadata or {}), **metadata_extra}
+
+        # 终态与花费：这次分析到底干了什么的一句话总结。放在成本回填之后 ——
+        # 放前面的话 tokens/cost 还是 0，日志会替库里"作证"说这次没花钱。
+        # 与 run_events_loaded / pipeline_done 同属一条 trace，一条 grep 全出来。
+        logger.info(
+            "run_finished",
+            status=outcome.status,
+            used_rules_only=outcome.used_rules_only,
+            stop_reason=outcome.stop_reason,
+            insight_count=int(persisted.get("insight_count", 0)),
+            context_tokens=int(result.context_tokens) if result is not None else 0,
+            tokens_input=int(run.tokens_input or 0),
+            tokens_output=int(run.tokens_output or 0),
+            cost=float(run.cost_actual or 0),
+        )
 
         # 提交！这一步绝不能只 flush。
         #

@@ -142,6 +142,85 @@ def test_configure_logging_is_idempotent():
     configure_logging(level="INFO", force=True)
     configure_logging(level="INFO")
     configure_logging(level="INFO")
+
+
+def test_worker_reuses_the_request_trace_id():
+    """Worker 必须沿用发起请求的那个 trace_id，而不是自己新起一个。
+
+    计划第 928 行：「HTTP 请求 → 入队 → Worker 执行 能被同一个 trace_id 串起来」。
+    但 contextvars **不跨进程** —— 不把 trace_id 作为任务参数传过去，worker 就会
+    另起一个。后果是拿着 Run 详情里的 trace_id 去 grep，只能捞到 Web 那半边，
+    排查时最需要的那段（模型调用、降级、落库）一条都看不到。
+
+    真机现象就是"链路看起来配齐了、实际断成两截"，而两边各自都是合法日志。
+    """
+    from app.analysis.runner import RunRequest, create_run
+    from app.models import DataSource, Project, User
+    from app.repositories import (
+        AgentRunRepository,
+        DataSourceRepository,
+        ProjectRepository,
+        UserRepository,
+    )
+    from app.tasks.analysis import execute_run_task
+    from app.utils.observability import current_trace_id
+
+    session = SessionLocal()
+    try:
+        users = UserRepository(session)
+        user = users.add(
+            User(
+                email=f"trace-{datetime.now(UTC).timestamp()}@example.com",
+                password_hash="x",
+            )
+        )
+        session.flush()
+        project = ProjectRepository(session).add(
+            Project(user_id=user.id, name="trace", budget_total=10, budget_used=0)
+        )
+        session.flush()
+        source = DataSourceRepository(session).add(
+            project.id,
+            DataSource(
+                project_id=project.id, type="file_upload", format="txt", location="a.log"
+            ),
+        )
+        session.flush()
+        run_id, _, _ = create_run(
+            AgentRunRepository(session),
+            RunRequest(
+                project_id=project.id,
+                source_id=source.id,
+                time_start=datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+                time_end=datetime(2026, 9, 23, 13, 0, tzinfo=UTC),
+                domain_id="computer_monitoring",
+                domain_version="1.0.0",
+            ),
+        )
+        session.commit()
+        project_id = project.id
+    finally:
+        session.close()
+
+    given = "trace-from-http-request"
+    seen: list[str | None] = []
+
+    def _capture(*, session_factory, run_id, project_id, start_tier):
+        # 在任务真正做事的地方读一次上下文：这才是日志会取到的值
+        seen.append(current_trace_id())
+        return {"run_id": run_id, "status": "stub"}
+
+    with patch("app.tasks.analysis._execute", side_effect=_capture):
+        execute_run_task.apply(
+            kwargs={
+                "run_id": run_id,
+                "project_id": project_id,
+                "start_tier": "L2",
+                "trace_id": given,
+            }
+        )
+
+    assert seen == [given], f"Worker 内的上下文应沿用它被告知的 trace_id，实际 {seen}"
     # 没有异常且 logger 可用即通过；重复叠加在 capsys 测试里会表现为多行输出
     assert get_logger("probe") is not None
 

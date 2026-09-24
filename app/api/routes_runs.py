@@ -32,6 +32,11 @@ from app.repositories.agent_run import AgentRunRepository
 from app.repositories.evidence import EvidenceRepository
 from app.repositories.insight import InsightRepository
 from app.services.upload_service import UploadService, UploadTooLargeError
+from app.utils.observability import get_logger
+
+#: Web 侧的日志也走 structlog：JSON + trace_id（计划第 928、937 行）。
+#: 用 stdlib 的 logging 会绕过处理器链，日志里就没有 trace_id 了。
+_logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -125,12 +130,16 @@ def create_analysis_run(
 
     domain = _load_domain()
     now = datetime.now(timezone.utc)
-    start = payload.time_range.start if payload.time_range and payload.time_range.start else _epoch()
-    end = payload.time_range.end if payload.time_range and payload.time_range.end else now
-
-    filters = (
-        payload.filters.model_dump(exclude_none=True) if payload.filters else {}
+    start = (
+        payload.time_range.start
+        if payload.time_range and payload.time_range.start
+        else _epoch()
     )
+    end = (
+        payload.time_range.end if payload.time_range and payload.time_range.end else now
+    )
+
+    filters = payload.filters.model_dump(exclude_none=True) if payload.filters else {}
     request = RunRequest(
         project_id=scope.project_id,
         source_id=int(source.id),
@@ -155,7 +164,10 @@ def create_analysis_run(
     if trace_id and not reused:
         run_row = runs.get(scope.project_id, run_id)
         if run_row is not None:
-            run_row.run_metadata = {**(run_row.run_metadata or {}), "trace_id": trace_id}
+            run_row.run_metadata = {
+                **(run_row.run_metadata or {}),
+                "trace_id": trace_id,
+            }
             session.flush()
 
     if not reused:
@@ -169,6 +181,16 @@ def create_analysis_run(
         # 2026-09-23 真机复现：本地 Redis + 单进程 worker 下必然踩中
         # （Run 元数据 context_tokens=0、model_attempts=[]，而库里其实有 16 条事件）。
         session.commit()
+        # Web 这半边也要留一条带 trace_id 的日志：否则"同一条 trace 串起
+        # 请求与执行"只存在于 worker 侧，grep 出来看不到是谁发起的。
+        _logger.info(
+            "analysis_run_created",
+            run_id=run_id,
+            project_id=scope.project_id,
+            source_id=int(source.id),
+            start_tier=request.start_tier,
+            trace_id=trace_id,
+        )
         _dispatch(run_id, scope.project_id, request)
 
     return CreateRunResponse(run_id=run_id, status=run_status, reused=reused)
@@ -210,7 +232,9 @@ def get_run_detail(scope: RunScopeDep, session: SessionDep) -> dict:
     insights = InsightRepository(session).list_for_run(scope.project_id, scope.run_id)
     evidence_repo = EvidenceRepository(session)
     evidence_by_insight = {
-        int(insight.id): evidence_repo.list_for_insight(scope.project_id, int(insight.id))
+        int(insight.id): evidence_repo.list_for_insight(
+            scope.project_id, int(insight.id)
+        )
         for insight in insights
     }
 
@@ -259,7 +283,9 @@ def list_run_insights(scope: RunScopeDep, session: SessionDep) -> list[InsightRe
     ]
 
 
-@router.get("/api/insights/{insight_id}", response_model=InsightResponse, tags=["insights"])
+@router.get(
+    "/api/insights/{insight_id}", response_model=InsightResponse, tags=["insights"]
+)
 def get_insight(scope: InsightScopeDep) -> InsightResponse:
     return _insight_response(scope.insight)
 
@@ -269,9 +295,13 @@ def get_insight(scope: InsightScopeDep) -> InsightResponse:
     response_model=list[EvidenceResponse],
     tags=["insights"],
 )
-def list_insight_evidence(scope: InsightScopeDep, session: SessionDep) -> list[EvidenceResponse]:
+def list_insight_evidence(
+    scope: InsightScopeDep, session: SessionDep
+) -> list[EvidenceResponse]:
     """证据是「fact 可点击核对」的数据来源（阶段 11 验收）。"""
-    rows = EvidenceRepository(session).list_for_insight(scope.project_id, scope.insight_id)
+    rows = EvidenceRepository(session).list_for_insight(
+        scope.project_id, scope.insight_id
+    )
     return [
         EvidenceResponse(
             id=int(e.id),
@@ -306,8 +336,14 @@ def _dispatch(run_id: int, project_id: int, request: RunRequest) -> None:
 
     派发失败**不吞掉**：标记成 error 字段由调用方看得到，但端点本身仍返回
     202 + queued（因为 Run 已创建，前端可以去查状态）。
+
+    `trace_id` 一并传过去：Worker 是另一个进程，contextvars 不会自己跨过去。
+    不传的话 worker 会新起一个 trace_id，于是计划第 928 行那句
+    「HTTP 请求 → 入队 → Worker 执行 能被同一个 trace_id 串起来」就只剩前半截。
     """
     import logging
+
+    from app.utils.observability import current_trace_id
 
     logger = logging.getLogger(__name__)
     try:
@@ -317,6 +353,7 @@ def _dispatch(run_id: int, project_id: int, request: RunRequest) -> None:
             run_id=run_id,
             project_id=project_id,
             start_tier=request.start_tier,
+            trace_id=current_trace_id(),
         )
     except Exception as exc:  # noqa: BLE001 - broker 不可用不该让创建失败
         logger.warning("派发 Run %s 到 Celery 失败：%s", run_id, exc)
@@ -327,7 +364,9 @@ def _insight_response(insight: Insight) -> InsightResponse:
         id=int(insight.id),
         project_id=int(insight.project_id),
         run_id=int(insight.run_id),
-        incident_id=int(insight.incident_id) if insight.incident_id is not None else None,
+        incident_id=int(insight.incident_id)
+        if insight.incident_id is not None
+        else None,
         type=insight.type,
         severity=insight.severity,
         confidence=float(insight.confidence),

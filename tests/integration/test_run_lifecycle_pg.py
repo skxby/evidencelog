@@ -208,6 +208,49 @@ def test_zombie_run_is_reclaimed_as_timeout(session, ctx):
     assert "心跳丢失" in stored.run_metadata["note"]
 
 
+def test_terminal_status_write_keeps_earlier_run_metadata(session, ctx):
+    """写终态时**不许**把 `run_metadata` 里已有的键冲掉。
+
+    真机现象：API 创建 Run 时写进去的 trace_id，在 Worker 跑完后就不见了 ——
+    报告页复述变成「trace 未记录」，计划第 928 行说的
+    「事后用 trace_id 把这次分析的日志全捞出来」直接落空。
+
+    根因：`apply_status` 用 `run.run_metadata = metadata` **覆盖**写入，
+    而它带的只有 completed_phases / skipped_phases / attempts。
+    最阴险的是触发条件 —— 只有"分析真的跑完"才会覆盖：Run 卡在 queued 时
+    trace_id 反而还在（真机上先看到的就是这种自相矛盾的两条记录）。
+
+    同文件里的僵尸回收走的是合并写法，两处语义不一致本身就是线索。
+    """
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    session.flush()
+
+    # 模拟创建 Run 的那次 HTTP 请求写下的 trace_id（与 routes_runs 一致）
+    created = runs.get(project.id, run_id)
+    created.run_metadata = {"trace_id": "trace-abc123", "policy": {"max_calls": 20}}
+    session.flush()
+
+    _executor(runs).execute(
+        project_id=project.id,
+        run_id=run_id,
+        attempt_tier=lambda tier: "ok",
+        start_tier="L1",
+    )
+    session.flush()
+    session.expire_all()
+
+    stored = runs.get(project.id, run_id)
+    assert stored.status == enums.AGENT_RUN_COMPLETED
+    assert stored.run_metadata.get("trace_id") == "trace-abc123", (
+        f"终态写入把 trace_id 冲掉了：{stored.run_metadata}"
+    )
+    assert stored.run_metadata.get("policy") == {"max_calls": 20}
+    # 终态自己的键当然也要在
+    assert "completed_phases" in stored.run_metadata
+    assert "attempts" in stored.run_metadata
+
+
 def test_fresh_run_is_not_reclaimed(session, ctx):
     """阈值必须大于单次最慢调用，否则正在正常工作的 Run 会被误杀。"""
     project, source, runs = ctx
