@@ -2,6 +2,22 @@
 
 **核心 Runtime 不出现任何 `if domain == ...`**（计划第 371 行）：它只通过
 `DomainBase` 接口访问本类。想加一个领域 = 加一个同样的目录包 + 注册一行。
+
+## 本领域的输入边界（**有意为之，不是缺陷**）
+
+认这三类行结构：**syslog**（`Mon DD HH:MM:SS host proc[pid]: msg`，年份/时区可缺）、
+**log4j**（`YYYY-MM-DD HH:MM:SS,mmm - LEVEL [thread] - msg`）、
+**Apache error**（`[Day Mon DD HH:MM:SS YYYY] [level] msg`）。
+指标行另认 `key=value` 形态（见 `parser.py`）。
+
+**不认 Web access 日志**（`93.180.71.3 - - [17/May/2015:08:05:32 +0000] "GET /x" 304 0`）——
+它是「站点访问」语义，不属于「主机/进程监控」这个领域：硬塞进来会让
+analyzer 与 runbook 的判据都失去含义。这类文件上传后**整批计入坏行并附样本**
+（计划第 540 行：无法解析的时间戳计坏行，绝不静默用当前时间替代），
+负样本就在 `logs/nginx_plain.log`，量化结果见 `logs/README.md`。
+
+要让平文 access 日志可解析 = **扩一个领域**（新目录包 + 注册一行），
+不是放宽本领域的 parser —— 那会把两种语义混在同一套判据里。
 """
 
 from __future__ import annotations

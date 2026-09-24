@@ -88,9 +88,12 @@ logagent-beat       Up
 
 1. **登录** —— 首次使用点「首次使用？注册这个邮箱」，用同一个邮箱 + 口令即可。
 2. **建项目** —— 项目是数据边界，所有日志与结论都归属某个项目。
-3. **上传日志** —— 选 `.txt`（syslog / log4j / Apache 风格）或 `.jsonl`（逐行 JSON）。
+3. **上传日志** —— 选 `.txt`（syslog / log4j / Apache error 三类行结构）或 `.jsonl`（逐行 JSON）。
    上传后页面会显示**解析统计**（总行 / 成功 / 坏行 / 跳过 / 合并）与**脱敏计数**。
    坏行会列出样本 —— 不会被静默丢弃。
+   > 边界提示：**Web access 平文日志不属本领域**（那是"站点访问"语义，不是"主机/进程监控"），
+   > 整批会计入坏行 —— 这是有意为之，负样本见 `logs/nginx_plain.log` 与 `logs/README.md`。
+   > 要让它能解析得**加一个领域**（新目录包 + 注册一行），而不是放宽现有 parser。
 4. **发起分析** —— 选数据源，可留空时间范围。API **立即返回** `run_id + queued`。
 5. **看状态** —— 状态页每 3 秒刷新，显示阶段进度、token、成本、心跳。
 6. **看报告** —— 结论按四层语义着色：
@@ -277,12 +280,15 @@ E2E      容器全栈 16/16；真实调用 1607/3058 tokens、¥0.0138、7 条�
 | 症状 | 处理 |
 |---|---|
 | `docker compose ps` 里 migrate 显示 `Exited (0)` | **正常**：迁移跑完即退出，web/worker 等它成功后才启动 |
+| 上传整批计为坏行（如 Web access 平文日志） | **不是 bug**：本领域只认 syslog / log4j / Apache error 与逐行 JSON，见 §3 的边界提示 |
 | web 起不来，日志显示连不上数据库 | 确认 postgres 是 `healthy`；`docker compose logs postgres` |
-| 模型分析总是降级成纯规则报告 | `.env` 里 `MODEL_PROVIDER_API_KEY` 是否为空／是否有效 |
+| 模型分析总是降级成纯规则报告 | `.env` 里 `MODEL_PROVIDER_API_KEY` 是否为空／是否有效；此时 Run 会是 `partial_success` + `model_unavailable`（不再假装"没发现异常"） |
 | 报告里没有结论 | 看 Run 状态：`partial_success`/`failed` 会写明中断原因；L0（正常日志）本就无异常结论 |
 | 想确认某次分析到底做了什么 | 打开 `/runs/<id>/detail?project_id=<pid>`，页面会复述阶段、花费、结论与证据 |
 | 端口被占用 | 改 compose 里的端口映射；注意只绑 `127.0.0.1` |
 | Celery 在 Windows 卡住 | 直跑时必须 `-P solo`（compose 里已加） |
+| 跑测试时看到 `StarletteDeprecationWarning: ... httpx ... install httpx2` | **已知上游弃用，暂不迁移**：换 httpx2 会波及所有用 `TestClient` 的集成测试。已在 `pytest.ini` 里显式标为已知告警（这样出现别的告警时一眼能看见），等 Starlette 正式切换再动 |
+| Worker 崩了，Run 卡在 running/queued | beat 容器上的维护队列会按心跳超时收成 `timeout`（间隔见 `ZOMBIE_REAP_INTERVAL_SECONDS`）；日志搜 `zombie_runs_reclaimed` |
 
 ---
 

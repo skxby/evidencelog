@@ -39,6 +39,30 @@ def count_forensic(text: str) -> dict[str, int]:
     return {label: len(rx.findall(text)) for label, rx in FORENSIC_PATTERNS.items()}
 
 
+#: 被替换掉的**原值** → 次数。用来复核误伤：脱敏是"宁可多替换也不漏真密钥"，
+#: 所以总会有个别非密钥被换掉，得让人看得见换的是什么。
+#: 键名形态的（如 `token: xxx`）取冒号后面的值，值形态的（如 `sk-...`）取整段。
+REPLACED_PATTERNS = (
+    re.compile(r"(?i)\b(?:token|password|passwd|secret|api[_-]?key)\s*[:=]\s*(\S{6,})"),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"),
+    re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"),
+)
+
+replaced_counter: dict[str, int] = {}
+
+
+def collect_replaced(raw: str, masked: str) -> None:
+    """把"原文里有、脱敏后没了"的值记下来（只记值，不记密钥本身）。"""
+    if raw == masked:
+        return
+    for pattern in REPLACED_PATTERNS:
+        for match in pattern.finditer(raw):
+            value = match.group(1) if match.groups() else match.group(0)
+            # 只有确实从脱敏结果里消失了才算"被替换"
+            if value and value not in masked:
+                replaced_counter[value] = replaced_counter.get(value, 0) + 1
+
+
 def main() -> int:
     domain = get_domain_registry().load("computer_monitoring")
     rows = []
@@ -54,6 +78,7 @@ def main() -> int:
         # ① 脱敏（与线上同一顺序：先脱敏，再解析）
         masker = Masker(mask_ip=True, enabled=True)
         masked = masker.mask(raw)
+        collect_replaced(raw, masked)
 
         # ② 解析
         parser = get_parser(fmt)
@@ -131,6 +156,16 @@ def main() -> int:
     for r in rows:
         if r["bad"] and r["sample"]:
             print(f"  {r['file']}: {r['sample']}")
+
+    # 被替换掉的值长什么样 —— 这张表让"已知误伤"可复核，而不是靠人记得。
+    # 脱敏是"宁可多替换也不漏真密钥"，所以总会有个别非密钥被换掉
+    # （已知 1 例：`stream/token: com.apple.xpc.activity/4505` →
+    #  `[SECRET_…]`，见 logs/README.md 的"已知误伤"一节）。
+    # 把替换值按出现次数列出来，规则一改就能立刻看出"多换了什么、少换了什么"。
+    print()
+    print("被替换的值（Top 15，用于复核误伤）：")
+    for value, count in sorted(replaced_counter.items(), key=lambda kv: (-kv[1], kv[0]))[:15]:
+        print(f"  ×{count:<4} {value[:90]}")
     return 0
 
 

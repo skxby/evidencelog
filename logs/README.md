@@ -80,9 +80,17 @@ logs/
 
 ### 已知误伤 1 例（**有意不改，记录在此**）
 
-| 样本 | 被替换成 | 判断 |
-|---|---|---|
-| `Mac_2k.log` 里的 `stream/token: com.apple.xpc.activity/4505` | `[SECRET_…]` | 1 / 12268 次替换；**不改规则** |
+跑 `.dsh/parser_eval.py` 会打印"被替换的值（Top 15）"，一眼可复核：
+
+```text
+×10   13957525385%40163.com@p28-contacts.icloud.com   ← 真邮箱（%40 是转义的 @），该换
+×1    bhcompile@bugs.build.redhat.com                 ← 真邮箱，该换
+×1    xpc_ben@163.com                                 ← 真邮箱，该换
+×1    com.apple.xpc.activity/4505:                    ← **误伤**：这是状态标识，不是凭据
+```
+
+也就是说 12268 次替换里，12 条 email 全部命中真邮箱，**只有 1 条是误伤**
+（`Mac_2k.log` 的 `stream/token: com.apple.xpc.activity/4505`）。
 
 为什么明知误伤还不改：`token:` 后面跟的绝大多数时候是真的凭据
 （`token: sk-…`、`token: eyJ…`）。放宽它（比如要求值像密钥、或排除

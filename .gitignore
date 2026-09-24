@@ -55,3 +55,14 @@ data/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# --- 已被取代的「来源快照」（不是遗漏，见下）---
+# 这两处放的是 skills 与 AGENTS.md 的**原始快照**：
+#   - 生效副本在 `.dsh/skills/`（stage-verify 已按真机口径重写，快照停在旧版本）
+#   - 生效的 `AGENTS.md` 在**项目根**（DSH 每次会话自动加载它；子目录里的那份不会）
+# 同一份东西两处存在必然分叉，所以只留一份真源：
+#   `mcp-内置skills/` 与 `tools-skills-prompt…/dsh-skills/` 留在本地供溯源，不进版本库；
+#   同目录里**项目自己写的**文档（DSH 提示词清单、调研报告）仍然入库。
+mcp-内置skills/
+tools-skills-prompt与选型和ide移植/AGENTS.md
+tools-skills-prompt与选型和ide移植/dsh-skills/
