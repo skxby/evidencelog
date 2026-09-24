@@ -352,13 +352,14 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         "达标" if tiny.get("http") == 402 else "未达标",
         f"项目预算 0.001 → HTTP {tiny.get('http')}：{tiny.get('detail')}",
     )
+    fake = ev.get("fake_evidence_check") or {}
     out["partial_success"] = (
-        "待实测",
-        f"partial_success 状态本身在真机出现过（模型不可用那次：Run "
-        f"{degrade.get('run_id')}，页面/接口带 stop_reason 与「结果可能不完整」的 note）；"
-        "但**极小预算触发**这一条真机没跑出来：这条链路的正常路径一次 Run 只调一次模型，"
-        "mid-check 没有第二次调用可拦 —— 要真机触发得人为造多轮场景"
-        "（输出截断 → 降级重试），本轮没做。单测与集成测试覆盖了控制器判定",
+        "达标" if fake.get("budget_stop_ok") else "待实测",
+        f"真机（桩供应商 + 单次上限 ¥0.019）：第一次调用花掉 ¥{fake.get('cost')} 后，"
+        f"**第二次调用前**的 mid-check 到顶 → Run {fake.get('run_id')} 收成 "
+        f"{fake.get('status')} + stop_reason={fake.get('stop_reason')}"
+        f"（错误原文：“{str(fake.get('error'))[:70]}”）；"
+        "链路保留已完成部分并写明「结果可能不完整」",
     )
     bud = real.get("project") or {}
     out["budget_accumulated"] = (
@@ -437,8 +438,15 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         f"{degrade.get('error_kinds')}（不可重试的错误不会被无谓重试）",
     )
     l0 = _scenario(ev, "evidence-empty-l0")
+    l1 = ev.get("l1_check") or {}
     out["tier_l0"] = ("达标", "空数据源的真机 Run 走 L0（model_attempts=0、cost=0），等级判定在链路内执行")
-    out["tier_l1"] = ("待实测", "本轮未取到 L1 的真机样本（真实语料直接 L2→L3 升级，空源走 L0）")
+    out["tier_l1"] = (
+        "达标" if l1.get("l1_reached") else "待实测",
+        f"真机造一份「少量、单一错误」的样本（6 行、2 条 ERROR、无异常命中）→ "
+        f"Run {l1.get('run_id')} 判到 **{l1.get('tiers')}**，"
+        f"context {l1.get('context_tokens')} tokens（L1 预算 2000）、"
+        f"真实花费 ¥{l1.get('cost')}、产出 {l1.get('insight_count')} 条结论",
+    )
     out["tier_escalation"] = (
         "达标" if any((c.get("tier") == "L3") for c in calls) else "未达标",
         f"真实语料与崩溃样本均升到 L3（Run 内 attempts={len(meta.get('attempts') or [])}，"
@@ -474,7 +482,15 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         "达标" if ctx and ctx <= 8000 else "未达标",
         f"L3 context_tokens={ctx} ≤ 预算 8000（L1/L2 分别为 2000/4000）",
     )
-    out["fake_event_id"] = ("待实测", "真机没有喂假 event_id（会伪造模型输出）；单测有 3 条针对性用例")
+    out["fake_event_id"] = (
+        "达标" if fake.get("fake_evidence_blocked") else "待实测",
+        f"真机（桩供应商返回一条引用不存在 event_id 的 fact）："
+        f"证据被拦下 {fake.get('evidence_rejections')} 条、链路带反馈重试"
+        f"（notes：“{(fake.get('notes_tail') or [''])[-2] if len(fake.get('notes_tail') or []) > 1 else ''}”）、"
+        f"库里落下的结论 {fake.get('insights_in_db')} 条、"
+        f"引用假 id 的证据 {fake.get('bogus_event_id_cited')} 条、"
+        f"无证据的 fact {fake.get('facts_without_evidence')} 条",
+    )
     fact_no_ev = int((real.get("counts") or {}).get("fact_without_evidence") or 0)
     dangling = (real.get("counts") or {}).get("cited_event_ids_not_in_run") or []
     out["fact_evidence"] = (
@@ -551,11 +567,15 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         "达标" if e2e.get("passed") == e2e.get("total") and e2e.get("total") else "待实测",
         f"对真跑起来的全栈走 16 项端到端检查：{e2e.get('passed')}/{e2e.get('total')}",
     )
+    fresh = ev.get("fresh_clone_check") or {}
     out["compose_e2e"] = (
-        "待实测",
-        f"compose 五服务 + 真实分析跑通（{e2e.get('passed')}/{e2e.get('total')}）；"
-        f"镜像源码哈希与工作区逐文件一致（3 处抽样）；"
-        "'全新环境 clone' 未在本机复现（本机已有 .env 与数据卷）",
+        "达标" if fresh.get("fresh_clone_ok") else "待实测",
+        f"真机走了完整一遍：`git clone`（{fresh.get('clone_files')} 个文件，"
+        f"clone 里没有 .env={fresh.get('clone_has_env')}）→ 按 README 放 .env → "
+        f"`docker compose up -d --build` → 健康检查通过 → "
+        f"clone 目录里跑 16 项端到端 **{fresh.get('e2e_passed')}/{fresh.get('e2e_total')}**"
+        f"（含一次真实分析 ¥{fresh.get('e2e_cost')}）→ 原栈已恢复"
+        f"（数据卷保留，{fresh.get('original_restored')}）",
     )
     return out
 
@@ -777,6 +797,10 @@ def main(argv: list[str]) -> int:
         "python .dsh/edge_scenarios.py --migration     # 迁移可回滚（临时库，零成本）",
         "python .dsh/edge_scenarios.py --degrade       # 模型不可用 → 降级（换无效 Key，零成本）",
         "python .dsh/edge_scenarios.py --retry-existing <run_id>   # 重新分析入口",
+        "python .dsh/stub_provider.py                 # 本地桩供应商（假 event_id / 触发预算到顶）",
+        "python .dsh/edge_scenarios.py --fake-evidence # 假 event_id 拦截 + 极小预算触发 partial",
+        "python .dsh/edge_scenarios.py --l1-sample     # 「少量单一错误」走 L1 的真机样本",
+        "python .dsh/fresh_clone_check.py             # 全新 clone → 一键起全栈 → 真实分析（停/起 docker）",
         "",
         "# ② 出表",
         "python .dsh/stage_acceptance.py",

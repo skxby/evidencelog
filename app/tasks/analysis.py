@@ -288,6 +288,11 @@ def _execute(
             "insight_count": int(persisted.get("insight_count", 0)),
             "evidence_count": int(persisted.get("evidence_count", 0)),
         }
+        if result is not None:
+            # 证据被拦下的条数与链路的自述：不记的话，"为什么这次结论这么少"
+            # 只能靠猜（真机上这是排障第一个要问的问题）。
+            metadata_extra["evidence_rejections"] = int(result.evidence_rejections or 0)
+            metadata_extra["notes"] = list(result.notes or [])
         # 降级链的尝试明细：哪个等级失败、失败原因是什么。
         # 不记的话，Run 详情只能显示"完成"，看不出中间降过级、为什么降。
         metadata_extra["attempts"] = list(outcome.attempts or [])

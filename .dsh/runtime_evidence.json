@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-09-24T21:45:10",
+ "generated_at": "2026-09-24T22:00:27",
  "base": "http://127.0.0.1:8001",
  "scenarios": [
   {
@@ -3505,7 +3505,7 @@
   }
  },
  "pytest": {
-  "tests": 752,
+  "tests": 753,
   "failures": 0,
   "errors": 0,
   "skipped": 3
@@ -3673,5 +3673,73 @@
   "new_run_id": 3711,
   "new_run_parent": 3710,
   "retry_entry_ok": true
+ },
+ "fake_evidence_check": {
+  "run_id": 3806,
+  "project_id": 8297,
+  "status": "partial_success",
+  "stop_reason": "budget_exceeded",
+  "error": "StopExecution: 第 1 轮证据校验未过，带反馈重试；已达策略上限，提前停止：已花成本 ¥0.0200 达到单次上限 ¥0.0190",
+  "model_calls": 1,
+  "cost": 0.02,
+  "rounds": [
+   1
+  ],
+  "evidence_rejections": 1,
+  "notes_tail": [
+   "1 条异常附上了对应的 runbook",
+   "第 1 轮证据校验未过，带反馈重试",
+   "已达策略上限，提前停止：已花成本 ¥0.0200 达到单次上限 ¥0.0190"
+  ],
+  "insights_in_db": 0,
+  "facts_without_evidence": 0,
+  "bogus_event_id_cited": 0,
+  "fake_evidence_blocked": true,
+  "budget_stop_ok": true
+ },
+ "l1_check": {
+  "run_id": 3807,
+  "project_id": 8298,
+  "status": "completed",
+  "parsed": 6,
+  "bad_lines": 0,
+  "model_calls": 1,
+  "tiers": [
+   "L1"
+  ],
+  "cost": 0.005027,
+  "tokens_input": 967,
+  "context_tokens": 518,
+  "insight_count": 6,
+  "l1_reached": true
+ },
+ "fresh_clone_check": {
+  "clone_exit": 0,
+  "clone_files": 1209,
+  "clone_has_env": false,
+  "env_copied": true,
+  "original_down_exit": 0,
+  "up_exit": 0,
+  "up_tail": [
+   " Container logagent-web Started ",
+   " Container logagent-beat Started ",
+   " Container logagent-worker Started"
+  ],
+  "healthy_after_up": true,
+  "e2e_exit": 0,
+  "e2e_passed": 16,
+  "e2e_total": 16,
+  "e2e_cost": 0.015036,
+  "e2e_tail": [
+   "  PASS  他人读 Run → 404  — HTTP 404",
+   "⑨ 页面与文档",
+   "  PASS  登录页可渲染  — HTTP 200",
+   "  PASS  /docs 可访问  — HTTP 200",
+   "",
+   "===== 16/16 项通过 ====="
+  ],
+  "restored_exit": 0,
+  "original_restored": true,
+  "fresh_clone_ok": true
  }
 }

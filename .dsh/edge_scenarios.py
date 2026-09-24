@@ -284,6 +284,173 @@ def partial_retry() -> int:
     return 0 if facts["partial_and_retry_ok"] else 1
 
 
+def fake_evidence() -> int:
+    """假 event_id + 极小单次上限：一次跑出两条验收的证据。
+
+    - **09-6**：桩供应商返回一条引用不存在 event_id 的 `fact` →
+      必须被拦截（不落库、不留 fact），并在链路里触发重试；
+    - **07-2**：桩每次上报的 token 让第一次调用的花费超过单次上限，
+      于是**第二次调用前**的 mid-check 到顶 → `partial_success` + 预算原因。
+
+    需要跑在一个 `MODEL_PROVIDER_BASE_URL` 指向桩的栈上（见 `.dsh/stub_provider.py`）。
+    """
+    token = _register("fake")
+    pid, sid = _new_project_with_upload(token, "edge-fake-evidence")
+    _, created = call(
+        "POST",
+        f"/api/projects/{pid}/analysis-runs",
+        {"data_source_id": sid, "start_tier": "L3"},
+        token,
+    )
+    run_id = created.get("run_id")
+    final = _poll(pid, run_id, token)
+
+    import sqlalchemy as sa
+
+    from app.config import get_settings
+
+    engine = sa.create_engine(str(get_settings().database_url))
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text(
+                "select status, error, run_metadata, model_calls, cost_actual, tokens_input,"
+                " tokens_output from agent_runs where id = :r"
+            ),
+            {"r": run_id},
+        ).one()
+        facts_without_evidence = int(
+            conn.execute(
+                sa.text(
+                    "select count(*) from insights i where i.run_id = :r and i.type='fact'"
+                    " and not exists (select 1 from evidences e where e.insight_id = i.id)"
+                ),
+                {"r": run_id},
+            ).scalar_one()
+        )
+        bogus_cited = int(
+            conn.execute(
+                sa.text(
+                    "select count(*) from evidences e join insights i on i.id = e.insight_id"
+                    " where i.run_id = :r and e.event_ids::text like '%999999999%'"
+                ),
+                {"r": run_id},
+            ).scalar_one()
+        )
+        insight_rows = int(
+            conn.execute(
+                sa.text("select count(*) from insights where run_id = :r"), {"r": run_id}
+            ).scalar_one()
+        )
+
+    metadata = row[2] or {}
+    rounds = [a.get("round") for a in (metadata.get("model_attempts") or [])]
+    facts = {
+        "run_id": run_id,
+        "project_id": pid,
+        "status": row[0],
+        "stop_reason": metadata.get("stop_reason"),
+        "error": str(row[1])[:120],
+        "model_calls": len(row[3] or []),
+        "cost": float(row[4] or 0),
+        "rounds": rounds,
+        "evidence_rejections": metadata.get("evidence_rejections"),
+        "notes_tail": (metadata.get("notes") or [])[-3:],
+        "insights_in_db": insight_rows,
+        "facts_without_evidence": facts_without_evidence,
+        "bogus_event_id_cited": bogus_cited,
+        # 09-6：假 id 没落库、没有无证据的 fact，且链路确实重试过（rounds > 1）
+        "fake_evidence_blocked": facts_without_evidence == 0
+        and bogus_cited == 0
+        and (metadata.get("evidence_rejections") or 0) >= 1,
+        # 07-2：第二次调用前的 mid-check 到顶 → partial_success + 预算原因
+        "budget_stop_ok": row[0] == "partial_success"
+        and metadata.get("stop_reason") == "budget_exceeded",
+    }
+    merge({"fake_evidence_check": facts})
+    print(json.dumps(facts, ensure_ascii=False, indent=1))
+    return 0 if (facts["fake_evidence_blocked"] and facts["budget_stop_ok"]) else 1
+
+
+def l1_sample() -> int:
+    """造一份"少量、单一"错误的真实格式日志，验证**真机判到 L1**。
+
+    L1 的判据（`app/analysis/complexity.py`）：`error_count < 10` 且无 high 异常、
+    且异常不跨多簇/多类型。本轮其他样本落在 L0（无错误）与 L2→L3（有 high 异常），
+    正好没有 L1 的 —— 这条就是把那个样本补上。
+
+    用 container 栈（真模型）跑，花费约 ¥0.006。
+    """
+    token = _register("l1")
+    _, project = call("POST", "/api/projects", {"name": "edge-l1", "budget_total": 10}, token)
+    pid = project["id"]
+
+    lines = [
+        "Sep 24 10:00:01 labhost app[100]: INFO starting worker pool",
+        "Sep 24 10:00:20 labhost app[101]: INFO listening on port 8080",
+        "Sep 24 10:01:05 labhost app[102]: ERROR upstream connect failed: connection refused",
+        "Sep 24 10:02:11 labhost app[103]: INFO retry scheduled in 5s",
+        "Sep 24 10:03:40 labhost app[104]: ERROR upstream connect failed: connection refused",
+        "Sep 24 10:04:02 labhost app[105]: INFO retry succeeded",
+    ]
+    payload = "\n".join(lines).encode() + b"\n"
+    boundary = "----l1" + secrets.token_hex(8)
+    body = bytearray()
+    body += f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="l1_sample.log"\r\n'.encode()
+    body += b"Content-Type: text/plain\r\n\r\n" + payload + b"\r\n"
+    body += f'--{boundary}\r\nContent-Disposition: form-data; name="fmt"\r\n\r\ntxt\r\n'.encode()
+    body += f"--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        f"{BASE}/api/projects/{pid}/upload", data=bytes(body), method="POST"
+    )
+    req.add_header("Authorization", "Bearer " + token)
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    with OPENER.open(req, timeout=180) as response:
+        up = json.loads(response.read() or b"{}")
+
+    _, created = call(
+        "POST",
+        f"/api/projects/{pid}/analysis-runs",
+        {"data_source_id": up["data_source_id"]},
+        token,
+    )
+    run_id = created.get("run_id")
+    final = _poll(pid, run_id, token)
+
+    import sqlalchemy as sa
+
+    from app.config import get_settings
+
+    engine = sa.create_engine(str(get_settings().database_url))
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text(
+                "select status, run_metadata, model_calls, cost_actual, tokens_input"
+                " from agent_runs where id = :r"
+            ),
+            {"r": run_id},
+        ).one()
+    metadata = row[1] or {}
+    calls = row[2] or []
+    tiers = [str(c.get("tier")) for c in calls]
+    facts = {
+        "run_id": run_id,
+        "project_id": pid,
+        "status": row[0],
+        "parsed": (up.get("parse") or {}).get("parsed"),
+        "bad_lines": (up.get("parse") or {}).get("bad_lines"),
+        "model_calls": len(calls),
+        "tiers": tiers,
+        "cost": float(row[3] or 0),
+        "tokens_input": int(row[4] or 0),
+        "context_tokens": metadata.get("context_tokens"),
+        "insight_count": metadata.get("insight_count"),
+        "l1_reached": tiers[:1] == ["L1"],
+    }
+    merge({"l1_check": facts})
+    print(json.dumps(facts, ensure_ascii=False, indent=1))
+    return 0 if facts["l1_reached"] else 1
+
+
 def retry_existing(run_id: int) -> int:
     """对一条**可重试**的 Run 走「重新分析」：新 Run 必须指回原 Run（parent_run_id）。
 
@@ -343,6 +510,10 @@ def main(argv: list[str]) -> int:
         return degrade()
     if "--partial-retry" in argv:
         return partial_retry()
+    if "--fake-evidence" in argv:
+        return fake_evidence()
+    if "--l1-sample" in argv:
+        return l1_sample()
     if "--retry-existing" in argv:
         index = argv.index("--retry-existing")
         return retry_existing(int(argv[index + 1]))
