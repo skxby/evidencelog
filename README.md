@@ -23,6 +23,7 @@ V1 是个人全栈、单领域、**只读**的日志分析 Runtime：上传日�
 | `logs/README.md` | 要改 Parser / 脱敏规则，需要真实日志语料与量化基线 |
 | `AGENTS.md` | 要给这个仓库提交改动：10 条硬约束与验收口径 |
 | `CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` | 想参与：怎么跑、提交前自检什么、讨论的规矩 |
+| `SECURITY.md` | 要报安全类问题，或想知道"哪些数据会离开本机 / 会发给模型供应商" |
 | `.dsh/skills/*/SKILL.md` | 要按既有节奏做加表、验收、提交、成本核算等固定动作 |
 
 > 代码与测试里大量出现「计划第 N 行」这类引用（`tests/datasets/*/expect.json`
