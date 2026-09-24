@@ -1,5 +1,8 @@
 # Log Intelligence Agent
 
+[![tests](https://github.com/skxby/evidencelog/actions/workflows/ci.yml/badge.svg)](https://github.com/skxby/evidencelog/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 把日志变成**带证据、可追溯、成本可控**的分析报告。
 
 V1 是个人全栈、单领域、**只读**的日志分析 Runtime：上传日志 → 脱敏 → 解析 →
@@ -16,7 +19,10 @@ V1 是个人全栈、单领域、**只读**的日志分析 Runtime：上传日�
 | `README.md`（本文件） | 想把它跑起来、想用页面走一遍最小流程 |
 | `Log_Intelligence_Agent_总工程文档.md` | **新会话 / 新窗口的第一站**：项目最高层总纲，读完即可接续工作 |
 | `Log_Intelligence_Agent_V1_个人全栈工程编码计划.md（最新版）.md` | 想知道"为什么这么设计"、要核对某个阶段的验收标准 |
+| `阶段验收表-真机口径.md` + `真机核验报告-2026-09-24.md` | 想判断"某功能在真机上到底生效没有"——每条验收 = 测试证据 + 真机接线 + 真机实测 |
 | `logs/README.md` | 要改 Parser / 脱敏规则，需要真实日志语料与量化基线 |
+| `AGENTS.md` | 要给这个仓库提交改动：10 条硬约束与验收口径 |
+| `CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` | 想参与：怎么跑、提交前自检什么、讨论的规矩 |
 | `.dsh/skills/*/SKILL.md` | 要按既有节奏做加表、验收、提交、成本核算等固定动作 |
 
 > 代码与测试里大量出现「计划第 N 行」这类引用（`tests/datasets/*/expect.json`
@@ -302,3 +308,17 @@ E2E      容器全栈 16/16；真实调用 1607/3058 tokens、¥0.0138、7 条�
 - CSV / JSON 导入（V1 只支持 TXT / JSONL）
 - Kubernetes、多环境流水线、复杂计费与角色权限
 - 自动化 LLM Judge（Golden Set 先人工核对）
+
+---
+
+## 9. 许可与参与
+
+- **许可**：[MIT](LICENSE)。仓库内 `logs/` 的日志语料来自公开数据集，
+  出处与许可见 `logs/README.md`。
+- **参与**：先读 [`CONTRIBUTING.md`](CONTRIBUTING.md)（提交前自检清单）与
+  [`AGENTS.md`](AGENTS.md)（10 条硬约束）；讨论请遵守
+  [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)。
+- **提交前请记住这个仓库最贵的一课**：*测试全绿 ≠ 功能生效*。
+  三条成本闸门曾经单测全绿、真机上从未被调用过 ——
+  所以碰真实路径的改动，请给出真机证据（落库/落盘事实或函数级追踪），
+  方法与工具见 `真机核验报告-2026-09-24.md` 与 `.dsh/`。
