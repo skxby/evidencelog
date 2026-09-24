@@ -81,6 +81,10 @@ class RunOutcome:
     value: Any = None
     attempts: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: 本次实际产出的结论/证据条数。调用方（分析任务）落库后回填，
+    #: 这样 Run 详情能如实显示"产出了几条"，而不是永远显示 0。
+    insight_count: int = 0
+    evidence_count: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -187,6 +191,7 @@ class RunExecutor:
         attempt_tier: Callable[[str], Any],
         start_tier: str,
         rules_only_fallback: Callable[[], Any] | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> RunOutcome:
         """执行 Run。任何路径都必须以明确状态收尾，不留 running 悬挂。"""
         # ① queued → running
@@ -237,7 +242,9 @@ class RunExecutor:
                 # 页面只能显示"失败了"，排障得去翻库，正是红线 4 要避免的含糊。
                 error_message = _last_error_from(outcome)
 
-            metadata = self._metadata(machine, stop_reason, outcome)
+            metadata = self._metadata(
+                machine, stop_reason, outcome, extra=extra_metadata
+            )
             self.runs.apply_status(
                 project_id,
                 run_id,
@@ -305,7 +312,12 @@ class RunExecutor:
         )
 
     def _metadata(
-        self, machine: StateMachine, stop_reason: str | None, outcome: Any
+        self,
+        machine: StateMachine,
+        stop_reason: str | None,
+        outcome: Any,
+        *,
+        extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "completed_phases": machine.completed_phases(),
@@ -320,6 +332,11 @@ class RunExecutor:
             )
         if outcome is not None:
             metadata["attempts"] = outcome.as_dict()["attempts"]
+        if extra:
+            # 调用方补充的信息（如落库后的结论条数）——不覆盖已有键，
+            # 已有的键来自状态机与中断原因，优先级更高。
+            for key, value in extra.items():
+                metadata.setdefault(key, value)
         return metadata
 
     def _current_status(self, project_id: int, run_id: int) -> str:

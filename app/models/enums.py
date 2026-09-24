@@ -104,17 +104,23 @@ def severity_check_sql(column: str = "severity") -> str:
 
 
 # ============================================================
-# Insight.type —— 计划冻结两种（§9 第 812 行附近、§7 第 332 行）
+# Insight.type —— 计划第 811、829–836 行的**四层语义**
 # ============================================================
 
 INSIGHT_TYPE_FACT: Final = "fact"
 INSIGHT_TYPE_INFERENCE: Final = "inference"
 INSIGHT_TYPE_POSSIBILITY: Final = "possibility"
+#: 计划第 836 行：「− 未知」+ 信息缺口。第四层与 possibility 的区别是
+#: 「不确定是不是这个原因」vs「信息不足，连候选都提不出来」，报告页要分开渲染，
+#: 故数据库也必须能存 —— 约束里少这一个值，模型按 schema 给出的合法结论
+#: 会在落库时被 CHECK 拒掉（真机实测发生过）。
+INSIGHT_TYPE_UNKNOWN: Final = "unknown"
 
 INSIGHT_TYPES: Final[tuple[str, ...]] = (
     INSIGHT_TYPE_FACT,
     INSIGHT_TYPE_INFERENCE,
     INSIGHT_TYPE_POSSIBILITY,
+    INSIGHT_TYPE_UNKNOWN,
 )
 
 #: 计划第 1112 行：根因只能标 inference / possibility，不能标 fact

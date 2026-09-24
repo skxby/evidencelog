@@ -66,6 +66,7 @@ def normalize_time_range(start: datetime | str, end: datetime | str) -> tuple[st
 
     naive 时间被拒绝：含糊的时间会让"同一时间范围"算出不同键。
     """
+
     def one(value: datetime | str, *, label: str) -> str:
         if isinstance(value, datetime):
             if value.tzinfo is None:
@@ -142,6 +143,10 @@ class ErrorKind:
     AUTH = "auth"
     BUDGET = "budget"
     VALIDATION = "validation"
+    #: 分析跑完了但**结果存不进去**（约束冲突、连接中断…）。
+    #: 与 input/auth/budget 并列为一类，因为它同样"再试一次没有意义"：
+    #: 重试只会把同一份结论再写一次、再失败一次，还要为此再付一次模型钱。
+    STORAGE = "storage"
     UNKNOWN = "unknown"
 
 
@@ -175,6 +180,18 @@ class ValidationFailureError(NonRetryableError):
     kind = ErrorKind.VALIDATION
 
 
+class StorageFailureError(NonRetryableError):
+    """结果落库失败（约束冲突、连接中断、序列化失败…）。
+
+    为什么必须单独一类：落库失败**发生在模型已经调完、钱已经花了之后**。
+    若把它当"未知错误"，降级链会继续往 L2→L1 再各调一次模型，每次产出
+    同一份写不进去的结论 —— 三次模型钱全白花，最后还得退到纯规则报告，
+    真正的原因（写库失败）反而被埋在最里面。
+    """
+
+    kind = ErrorKind.STORAGE
+
+
 def classify_error(exc: BaseException) -> str:
     """把一个异常归入上面的分类。
 
@@ -190,8 +207,14 @@ def classify_error(exc: BaseException) -> str:
     if isinstance(exc, ModelUnavailableError):
         return ErrorKind.RETRYABLE
     if isinstance(exc, StructuredOutputError):
-        # 结构化输出失败属于"校验失败"：重试同一模型同一提示通常仍失败
-        return ErrorKind.VALIDATION
+        # **可重试**：结构化输出失败通常是"模型没按格式给"或"输出被 token 上限截断"，
+        # 而这两件事都是**随等级变化**的 —— 换个等级/换个预算往往就能过。
+        # 阶段 08 的降级链（L3→L2→L1）正是为这种情况设计的。
+        #
+        # 早先把它归为"校验失败不可重试"，后果是：L3 因输出截断失败后，
+        # 整条链路直接退到纯规则报告（零结论），而降级链根本没被用上。
+        # 真正不可重试的是**输入**类校验失败（InputFormatError 等）。
+        return ErrorKind.RETRYABLE
     return ErrorKind.UNKNOWN
 
 

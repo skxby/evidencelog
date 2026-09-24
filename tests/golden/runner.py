@@ -131,28 +131,10 @@ def run_scenario(
         outcome.bad_lines += int(stats.get("bad_lines", 0))
         outcome.events_persisted += int(result.events_persisted)
 
-    # 从库里取回事件，喂给分析链路（与 Worker 的做法一致）
-    from sqlalchemy import select
+    # 从库里取回事件，喂给分析链路（与 Worker **同一个**装载器）
+    from app.repositories.event import EventRepository
 
-    from app.models.event import Event
-
-    rows = session.execute(
-        select(Event).where(Event.project_id == project_id).order_by(Event.timestamp, Event.id)
-    ).scalars().all()
-    for row in rows:
-        meta = dict(row.meta or {})
-        pipeline_events.append(
-            {
-                "event_id": int(row.id),
-                "source_id": int(row.source_id),
-                "timestamp": row.timestamp,
-                "severity": row.severity,
-                "event_type": row.event_type,
-                "message": row.message,
-                "payload": row.payload,
-                "metadata": meta,
-            }
-        )
+    pipeline_events.extend(EventRepository(session).pipeline_events(project_id))
 
     if not pipeline_events:
         # 一个事件都没有也能判定（malformed 场景就是靠这个）
@@ -195,7 +177,9 @@ def check_expectation(
     checks: list[CheckResult] = []
     scenario = expectation.scenario
 
-    def add(assertion: str, passed: bool, detail: str = "", source_key: str = "") -> None:
+    def add(
+        assertion: str, passed: bool, detail: str = "", source_key: str = ""
+    ) -> None:
         checks.append(
             CheckResult(
                 scenario=scenario,

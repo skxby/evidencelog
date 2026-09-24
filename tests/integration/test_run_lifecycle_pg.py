@@ -48,7 +48,10 @@ def session():
 def ctx(session):
     users = UserRepository(session)
     user = users.add(
-        User(email=f"stage08-{datetime.now(UTC).timestamp()}@example.com", password_hash="x")
+        User(
+            email=f"stage08-{datetime.now(UTC).timestamp()}@example.com",
+            password_hash="x",
+        )
     )
     session.flush()
     project = ProjectRepository(session).add(
@@ -57,7 +60,9 @@ def ctx(session):
     session.flush()
     source = DataSourceRepository(session).add(
         project.id,
-        DataSource(project_id=project.id, type="file_upload", format="txt", location="a.log"),
+        DataSource(
+            project_id=project.id, type="file_upload", format="txt", location="a.log"
+        ),
     )
     session.flush()
     runs = AgentRunRepository(session)
@@ -144,7 +149,9 @@ def test_same_request_is_reused_without_creating_a_second_run(session, ctx):
 def test_different_filters_produce_a_different_run(session, ctx):
     """幂等键包含 filters：条件不同就是不同的分析。"""
     project, source, runs = ctx
-    first_id, _, _ = create_run(runs, _request(project, source, filters={"severity": ["high"]}))
+    first_id, _, _ = create_run(
+        runs, _request(project, source, filters={"severity": ["high"]})
+    )
     session.flush()
     second_id, _, reused = create_run(
         runs, _request(project, source, filters={"severity": ["low"]})
@@ -450,6 +457,7 @@ def test_heartbeat_is_updated_during_execution(session, ctx):
     stored = runs.get(project.id, run_id)
     assert stored.last_heartbeat is not None, "执行期必须写心跳，否则僵尸回收无从判断"
 
+
 # ============================================================
 # 回归：Worker 任务必须自己提交它改的东西
 # ============================================================
@@ -493,8 +501,9 @@ def test_worker_task_commits_its_own_changes(session, ctx):
     def _boom(*args, **kwargs):
         raise RuntimeError("模型不可达（测试桩）")
 
-    with patch("app.config.get_settings", return_value=_FakeSettings()), patch(
-        "app.gateways.router.build_router", side_effect=_boom
+    with (
+        patch("app.config.get_settings", return_value=_FakeSettings()),
+        patch("app.gateways.router.build_router", side_effect=_boom),
     ):
         out = _execute(
             session_factory=SessionLocal,
@@ -523,3 +532,273 @@ def test_worker_task_commits_its_own_changes(session, ctx):
     assert status in (enums.AGENT_RUN_PARTIAL_SUCCESS, enums.AGENT_RUN_FAILED)
     if status == enums.AGENT_RUN_PARTIAL_SUCCESS:
         assert metadata and metadata.get("stop_reason") == "model_unavailable"
+
+
+# ============================================================
+# 回归：Worker 装载的事件必须让 analyzer 看得见进程名（metadata）
+# ============================================================
+
+
+def test_worker_loads_event_metadata_so_analyzers_fire(session, ctx, work_tmp):
+    """Worker 装载的事件必须带 `metadata`，否则整条分析会**静默**退化成零结论。
+
+    被"真起全栈跑一遍"逼出来的第二个 bug，比第一个更隐蔽：
+
+    Worker 早先手写了一份 ORM→链路的事件映射，唯独漏了 `metadata`
+    （进程名 `proc` 在里面）。后果是一条完整的连锁反应 ——
+    `ProcessCrash` 看不到 `CrashReporterSupportHelper` 这类崩溃上报进程
+    → 候选异常 0 → 复杂度判定为 L0 → 走"纯代码统计报告"分支，
+    **模型一次都没被调用** → Run 以 `completed` 收场、0 条结论、¥0 花费。
+
+    每一环都"成功"：任务返回值正常、状态机正常、详情页正常。
+    只有把真实日志喂进真实 Worker 路径才会暴露，所以本测试走的是
+    「上传真实的 crash 数据集 → `_execute` → 读库」这条完整链路。
+    """
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from app.repositories.event import EventRepository
+    from app.services.upload_service import UploadService
+    from app.tasks.analysis import _execute
+
+    project, source, runs = ctx
+
+    # ① 用真实数据集走真实上传管道（脱敏→落盘→解析→入库）
+    dataset = Path(__file__).resolve().parents[1] / "datasets" / "crash" / "system.log"
+    content = dataset.read_bytes()
+    uploaded = UploadService(session, uploads_dir=work_tmp / "uploads").ingest(
+        project_id=project.id,
+        content=content,
+        filename="system.log",
+        fmt="txt",
+        data_source_id=source.id,
+    )
+    assert uploaded.events_persisted > 0, "数据集必须真的入库，否则测的是空集合"
+    session.commit()
+
+    # ② 装载器本身：`proc` 必须出现在事件字典里
+    events = EventRepository(session).pipeline_events(project.id)
+    procs = [(e.get("metadata") or {}).get("proc") for e in events]
+    assert any(procs), (
+        "事件字典里没有 metadata.proc —— analyzer 只能看到消息，"
+        "崩溃上报进程（CrashReporterSupportHelper）会被整批漏掉"
+    )
+
+    real_ids = [str(e["event_id"]) for e in events]
+
+    # ③ 驱动真实 Worker 路径。router 用桩：只验证"模型确实被调到"，
+    #    不在这里花真钱（真实网关由 test_gateway_live.py 覆盖）。
+    class _StubResult:
+        tokens_input = 123
+        tokens_output = 45
+        cost = 0.0001
+
+        def __init__(self) -> None:
+            self.parsed = {
+                "insights": [
+                    {
+                        "type": "fact",
+                        "severity": "high",
+                        "confidence": 0.9,
+                        "title": "崩溃上报进程异常",
+                        "summary": "CrashReporterSupportHelper 反复上报，疑有进程崩溃。",
+                        "evidence_ids": [real_ids[0]],
+                        "reasoning": "进程名命中 crash 模式",
+                        "limitations": "单文件统计，无跨文件基线",
+                    }
+                ],
+                "knowledge_candidates": [],
+            }
+
+    calls: list[dict] = []
+
+    class _StubRouter:
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+            return _StubResult()
+
+    class _FakeSettings:
+        model_provider_base_url = "https://example.invalid"
+        secret_key = "test-secret"
+        default_timezone = "Asia/Shanghai"
+        data_dir = "./data"
+        model_l1 = model_l2 = model_l3 = "test-model"
+        model_l1_reasoning = model_l2_reasoning = model_l3_reasoning = "off"
+        model_l1_price_input_per_1m = model_l1_price_output_per_1m = 1.0
+        model_l2_price_input_per_1m = model_l2_price_output_per_1m = 1.0
+        model_l3_price_input_per_1m = model_l3_price_output_per_1m = 1.0
+
+    run_id, _, _ = create_run(runs, _request(project, source))
+    session.commit()
+
+    with (
+        patch("app.config.get_settings", return_value=_FakeSettings()),
+        patch("app.gateways.router.build_router", return_value=_StubRouter()),
+    ):
+        out = _execute(
+            session_factory=SessionLocal,
+            run_id=run_id,
+            project_id=project.id,
+            start_tier="L2",
+        )
+
+    assert calls, (
+        "模型一次都没被调用 —— 说明复杂度落到了 L0（纯规则报告），"
+        "而这正是漏装 metadata 的症状"
+    )
+    assert out["status"] == enums.AGENT_RUN_COMPLETED
+    assert out["insights"]["insight_count"] >= 1, (
+        f"模型产出了结论却没落库：{out['insights']}"
+    )
+
+    # ④ 从独立会话复查落库结果：tier 不是 L0，且成本/token 已回填
+    fresh = SessionLocal()
+    try:
+        from sqlalchemy import text as _text
+
+        payload = fresh.execute(
+            _text(
+                "SELECT run_metadata, tokens_input, cost_actual FROM agent_runs WHERE id = :i"
+            ),
+            {"i": run_id},
+        ).one()
+    finally:
+        fresh.close()
+
+    metadata, tokens_input, cost = payload
+    assert metadata.get("used_rules_only") is False
+    assert metadata.get("model_attempts"), "模型调用必须留痕，否则详情页显示 0 次调用"
+    assert tokens_input == 123 and float(cost) > 0
+
+
+def test_persistence_failure_ends_the_run_as_failed_not_queued(session, ctx, work_tmp):
+    """结论写不进库时，Run 必须以 `failed` + 真实原因收尾。
+
+    第三个"真起全栈跑一遍"逼出来的 bug，也是最难查的一个：
+
+    落库原先在 `executor.execute()` **之后**做。可那时 Run 已经是终态
+    （completed）—— 状态机明令终态不可再改 —— 一旦落库抛异常逃出任务，
+    `session.close()` 会把整个事务回滚：**Run 永远停在 queued**。
+    页面上一切正常，Celery 只在自己日志里记了一笔，报告页看到的只是
+    "排队中"。这是红线 4 最典型的违反：失败发生了，但没人看得见。
+
+    修法有两处，本测试同时覆盖：
+      ① 落库挪进 `attempt_tier`（终态之前），失败即一次"等级尝试失败"；
+      ② 逃逸异常由外层兜底写进 Run，绝不留下无声的 queued。
+    """
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from sqlalchemy import text as _text
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services.upload_service import UploadService
+    from app.tasks.analysis import _execute
+
+    project, source, runs = ctx
+
+    dataset = Path(__file__).resolve().parents[1] / "datasets" / "crash" / "system.log"
+    uploaded = UploadService(session, uploads_dir=work_tmp / "uploads").ingest(
+        project_id=project.id,
+        content=dataset.read_bytes(),
+        filename="system.log",
+        fmt="txt",
+        data_source_id=source.id,
+    )
+    assert uploaded.events_persisted > 0
+    session.commit()
+
+    from app.repositories.event import EventRepository
+
+    real_ids = [
+        str(e["event_id"]) for e in EventRepository(session).pipeline_events(project.id)
+    ]
+
+    class _StubResult:
+        tokens_input = 10
+        tokens_output = 20
+        cost = 0.0005
+
+        def __init__(self) -> None:
+            self.parsed = {
+                "insights": [
+                    {
+                        "type": "inference",
+                        "severity": "medium",
+                        "confidence": 0.6,
+                        "title": "疑似崩溃",
+                        "summary": "崩溃上报进程反复出现。",
+                        "evidence_ids": [real_ids[0]],
+                        "reasoning": "进程名命中 crash",
+                    }
+                ],
+                "knowledge_candidates": [],
+            }
+
+    calls: list[str] = []
+
+    class _StubRouter:
+        def generate(self, **kwargs):
+            calls.append(kwargs.get("tier"))
+            return _StubResult()
+
+    class _FakeSettings:
+        model_provider_base_url = "https://example.invalid"
+        secret_key = "test-secret"
+        default_timezone = "Asia/Shanghai"
+        data_dir = "./data"
+        model_l1 = model_l2 = model_l3 = "test-model"
+        model_l1_reasoning = model_l2_reasoning = model_l3_reasoning = "off"
+        model_l1_price_input_per_1m = model_l1_price_output_per_1m = 1.0
+        model_l2_price_input_per_1m = model_l2_price_output_per_1m = 1.0
+        model_l3_price_input_per_1m = model_l3_price_output_per_1m = 1.0
+
+    run_id, _, _ = create_run(runs, _request(project, source))
+    session.commit()
+
+    # 模拟落库被数据库拒绝（真机上就是 CHECK 约束不认某个值）
+    def _reject(*args, **kwargs):
+        raise IntegrityError("INSERT INTO insights", {}, Exception("CHECK 约束拒绝"))
+
+    with (
+        patch("app.config.get_settings", return_value=_FakeSettings()),
+        patch("app.gateways.router.build_router", return_value=_StubRouter()),
+        patch("app.analysis.persistence.persist_insights", side_effect=_reject),
+    ):
+        out = _execute(
+            session_factory=SessionLocal,
+            run_id=run_id,
+            project_id=project.id,
+            start_tier="L2",
+        )
+
+    assert out["status"] == enums.AGENT_RUN_FAILED, (
+        f"落库失败必须如实置 failed，实际 {out['status']}"
+    )
+    # 关键：落库失败发生在钱花完之后，只许调一次模型，不许再降级重试烧钱。
+    # （这里记的是链路算出的复杂度等级，不是降级链的起始等级。）
+    assert len(calls) == 1, f"落库失败不该继续降级调模型，实际调用 {calls}"
+
+    fresh = SessionLocal()
+    try:
+        status, error, metadata = fresh.execute(
+            _text("SELECT status, error, run_metadata FROM agent_runs WHERE id = :i"),
+            {"i": run_id},
+        ).one()
+    finally:
+        fresh.close()
+
+    assert status == enums.AGENT_RUN_FAILED, "Run 不许留在 queued/running"
+    assert error and "落库失败" in error, f"失败原因必须落库，实际 error={error!r}"
+    assert metadata.get("attempts"), "降级链的尝试明细必须留痕"
+
+    # 失败归失败，已经花掉的 token 与成本仍要如实记录（钱是真花了）
+    fresh = SessionLocal()
+    try:
+        tokens_input, cost = fresh.execute(
+            _text("SELECT tokens_input, cost_actual FROM agent_runs WHERE id = :i"),
+            {"i": run_id},
+        ).one()
+    finally:
+        fresh.close()
+    assert tokens_input == 10 and float(cost) > 0

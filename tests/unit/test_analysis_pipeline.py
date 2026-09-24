@@ -879,3 +879,112 @@ def test_knowledge_candidates_are_draft_and_evidence_checked():
     assert "好的候选" in titles
     assert "假证据候选" not in titles, "证据全无效的候选不允许进 staging"
     assert all(c["status"] == "draft" for c in result.knowledge_candidates)
+
+# ============================================================
+# 回归：模型那一段失败时，不能悄悄产出"零结论的完成报告"
+# ============================================================
+
+
+class StructuredFailingRouter:
+    """模拟"模型返回了内容但 JSON 被截断"这一真实故障。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, *, tier, prompt, schema, max_output_tokens, **kwargs):
+        from app.gateways.base import StructuredOutputError
+
+        self.calls += 1
+        raise StructuredOutputError(
+            "要求结构化输出但未能解析出 JSON 对象；原始内容被截断"
+        )
+
+
+def test_structured_output_failure_is_raised_for_the_fallback_ladder():
+    """结构化输出失败必须**上抛**给降级链，而不是就地放弃。
+
+    真实故障（2026-09-23 真机跑出来）：L3 的输出被 token 上限截断 → JSON 不完整
+    → 早先的实现把它吞成"降级为纯规则报告"，于是整条链路直接退到零结论，
+    而阶段 08 精心实现的 L3→L2→L1 降级链**根本没被用上**。
+    """
+    from app.analysis.pipeline import PipelineInput, analyze
+    from app.gateways.base import StructuredOutputError
+
+    router = StructuredFailingRouter()
+    with pytest.raises(StructuredOutputError):
+        analyze(
+            PipelineInput(
+                project_id=1, source_id=1, domain_id="computer_monitoring",
+                domain_version="1.0.0", time_start=T0, time_end=T0 + timedelta(hours=1),
+                events=_events_with_errors(),
+            ),
+            analyzers=_fake_domain().analyzers(),
+            domain=_fake_domain(),
+            router=router,
+        )
+    assert router.calls == 1
+
+
+def test_output_budget_scales_with_tier():
+    """输出预算必须按等级给足：一次调用要产出 insights 与 knowledge_candidates，
+    给太小会把 JSON 截断在中间 —— 那正是真机上那次失败的直接原因。"""
+    from app.analysis.pipeline import OUTPUT_TOKEN_BUDGET_BY_TIER
+
+    assert OUTPUT_TOKEN_BUDGET_BY_TIER["L1"] == 2000
+    assert OUTPUT_TOKEN_BUDGET_BY_TIER["L2"] == 4000
+    assert OUTPUT_TOKEN_BUDGET_BY_TIER["L3"] == 8000
+    assert (
+        OUTPUT_TOKEN_BUDGET_BY_TIER["L1"]
+        < OUTPUT_TOKEN_BUDGET_BY_TIER["L2"]
+        < OUTPUT_TOKEN_BUDGET_BY_TIER["L3"]
+    )
+
+
+class BudgetRecordingRouter:
+    def __init__(self) -> None:
+        self.max_output_tokens: list[int] = []
+
+    def generate(self, *, tier, prompt, schema, max_output_tokens, **kwargs):
+        from app.gateways.base import ModelResult
+
+        self.max_output_tokens.append(max_output_tokens)
+        return ModelResult(
+            content="{}", parsed={"insights": []}, tokens_input=10,
+            tokens_output=5, model="fake", tier=tier, cost=0.0,
+        )
+
+
+@pytest.mark.parametrize(("label", "expected"), [("L3", 8000)])
+def test_pipeline_uses_tier_output_budget_by_default(label: str, expected: int):
+    from app.analysis.pipeline import PipelineInput, analyze
+
+    router = BudgetRecordingRouter()
+    analyze(
+        PipelineInput(
+            project_id=1, source_id=1, domain_id="computer_monitoring",
+            domain_version="1.0.0", time_start=T0, time_end=T0 + timedelta(hours=1),
+            events=_events_with_errors(),
+        ),
+        analyzers=_fake_domain().analyzers(),
+        domain=_fake_domain(),
+        router=router,
+    )
+    assert router.max_output_tokens == [expected]
+
+
+def test_explicit_output_budget_still_honoured():
+    from app.analysis.pipeline import PipelineInput, analyze
+
+    router = BudgetRecordingRouter()
+    analyze(
+        PipelineInput(
+            project_id=1, source_id=1, domain_id="computer_monitoring",
+            domain_version="1.0.0", time_start=T0, time_end=T0 + timedelta(hours=1),
+            events=_events_with_errors(),
+        ),
+        analyzers=_fake_domain().analyzers(),
+        domain=_fake_domain(),
+        router=router,
+        max_output_tokens=123,
+    )
+    assert router.max_output_tokens == [123]

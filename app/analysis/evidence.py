@@ -25,6 +25,8 @@ from app.models.enums import (
     INSIGHT_TYPE_FACT,
     INSIGHT_TYPE_INFERENCE,
     INSIGHT_TYPE_POSSIBILITY,
+    INSIGHT_TYPE_UNKNOWN,
+    INSIGHT_TYPES,
 )
 
 #: 计划第 844 行：无效占比超过这个比例就整条拒绝并重试
@@ -33,15 +35,11 @@ REJECT_INVALID_RATIO = 0.50
 #: 计划第 844 行：最多 3 次
 MAX_EVIDENCE_RETRIES = 3
 
-#: 未知类型（计划第 811 行 schema 里有 "unknown"）
-INSIGHT_TYPE_UNKNOWN = "unknown"
-
-VALID_INSIGHT_TYPES = (
-    INSIGHT_TYPE_FACT,
-    INSIGHT_TYPE_INFERENCE,
-    INSIGHT_TYPE_POSSIBILITY,
-    INSIGHT_TYPE_UNKNOWN,
-)
+#: 合法类型直接取自 `app.models.enums` —— **不要再抄一份**。
+#: 抄成两份的后果实测过：这里认 4 种、数据库约束只认 3 种，
+#: 于是模型按 schema 给出的 `unknown` 结论在落库时才被 CHECK 拒掉，
+#: 整次分析以"任务崩溃 + Run 停在 queued"收场。
+VALID_INSIGHT_TYPES = INSIGHT_TYPES
 
 #: 该类型必须有 evidence（计划第 833 行）
 TYPES_REQUIRING_EVIDENCE = (INSIGHT_TYPE_FACT,)

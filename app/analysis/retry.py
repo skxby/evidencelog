@@ -24,8 +24,11 @@ from typing import Any, TypeVar
 from app.analysis.idempotency import ErrorKind, classify_error, is_retryable
 from app.gateways.base import MODEL_TIERS
 from app.policy import STOP_MODEL_UNAVAILABLE
+from app.utils.observability import get_logger
 
 T = TypeVar("T")
+
+logger = get_logger(__name__)
 
 #: 计划第 715 行：最多 3 次
 MAX_RETRIES = 3
@@ -130,6 +133,13 @@ def call_with_retry(
         except BaseException as exc:  # noqa: BLE001 - 需要按类型决定是否重试
             last_exc = exc
             kind = classify_error(exc)
+            # **留痕**：这里若不记日志，被吞掉的异常在整条链路里不留任何痕迹，
+            # 最终表现为"分析完成但没有结论"，排查时完全无从下手
+            # （2026-09-23 真机故障就是这么被掩盖的）。
+            logger.warning(
+                "attempt_failed", attempt=attempt, error_kind=kind,
+                error=f"{type(exc).__name__}: {exc}",
+            )
             if not is_retryable(exc):
                 history.append(
                     AttemptRecord(attempt=attempt, error_kind=kind, error=f"{type(exc).__name__}: {exc}")

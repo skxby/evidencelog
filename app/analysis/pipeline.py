@@ -48,8 +48,14 @@ from app.analysis.grouping import (
     cluster_events,
     merge_into_incidents,
 )
-from app.gateways.base import TIER_L0
+from app.gateways.base import TIER_L0, StructuredOutputError
 from app.tools.data_ops import stats_calculator
+
+#: 各等级的输出 token 预算。
+#: 输入侧由阶段 07 的 CONTEXT_BUDGET_BY_TIER 控制，这里管**输出**。
+#: 给足是必要的：一次调用要同时产出 insights 与 knowledge_candidates，
+#: 且每条结论含 summary/reasoning/limitations —— 2000 在真实数据上会被截断。
+OUTPUT_TOKEN_BUDGET_BY_TIER: dict[str, int] = {"L1": 2000, "L2": 4000, "L3": 8000}
 
 #: 计划第 748–749 行：同一次调用同时输出 insights 与 knowledge_candidates
 ANALYSIS_SCHEMA: dict[str, Any] = {
@@ -294,7 +300,10 @@ def analyze(
     context_budgets: Any = None,
     group_window_seconds: int = DEFAULT_GROUP_WINDOW_SECONDS,
     merge_window_seconds: int = DEFAULT_MERGE_WINDOW_SECONDS,
-    max_output_tokens: int = 2000,
+    # 输出预算按等级给足：一次调用要同时产出 insights 与 knowledge_candidates，
+    # 且每条结论含 summary/reasoning/limitations。给太小会把 JSON 截断在中间，
+    # 解析必然失败 —— 这不是模型的问题，是预算没给够。
+    max_output_tokens: int | None = None,
     enable_self_critique: bool = True,
     record: bool = False,
     project_id_for_recording: int | None = None,
@@ -447,6 +456,10 @@ def analyze(
     if context.compression_notes:
         result.notes.extend(context.compression_notes)
 
+    # 未显式指定时按等级给输出预算（见函数开头说明）
+    if max_output_tokens is None:
+        max_output_tokens = OUTPUT_TOKEN_BUDGET_BY_TIER.get(complexity.tier, 2000)
+
     # ---- 模型分析（含幻觉校验与带反馈重试）----
     _run_model_analysis(
         result,
@@ -557,7 +570,18 @@ def _run_model_analysis(
                 project_id=project_id if record else None,
                 run_id=run_id if record else None,
             )
-        except Exception as exc:  # noqa: BLE001 - 模型失败要走降级，不能把链路打断
+        except StructuredOutputError:
+            # 结构化输出失败是**可以换个等级再试**的：常见原因是输出被 token
+            # 上限截断，或该等级不擅长按格式作答。**上抛**给 RunExecutor 的
+            # 降级链处理（L3→L2→L1），而不是在这里直接放弃。
+            #
+            # 早先这里把任何异常都吞成"降级为纯规则报告"，后果是：L3 一旦失败，
+            # 整条链路立刻退到零结论，而精心实现的降级链根本没被用上。
+            result.notes.append(
+                f"等级 {complexity_tier} 的结构化输出失败，交由降级链重试"
+            )
+            raise
+        except Exception as exc:  # noqa: BLE001 - 其余失败（如模型不可用）走纯规则兜底
             result.notes.append(
                 f"模型调用失败（{type(exc).__name__}: {exc}），已降级为纯规则报告"
             )

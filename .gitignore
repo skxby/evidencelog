@@ -25,6 +25,8 @@ htmlcov/
 .npm-cache/
 # 测试探针（系统临时目录在沙箱下不可枚举，探针库落在工作区内）
 .pytest-tmp/
+# pytest 在缓存目录不可写时留下的临时目录（沙箱下删不掉，别让它进版本库）
+pytest-cache-files-*/
 # alembic 执行后留下的字节码目录
 migrations/__pycache__/
 

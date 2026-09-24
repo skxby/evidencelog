@@ -21,10 +21,12 @@ from app.analysis.heartbeat import (
     validate_heartbeat_timeout,
 )
 from app.analysis.idempotency import (
+    RETRYABLE_KINDS,
     AuthenticationError,
     BudgetExhaustedError,
     ErrorKind,
     InputFormatError,
+    StorageFailureError,
     ValidationFailureError,
     canonical_json,
     classify_error,
@@ -85,7 +87,13 @@ def test_queued_goes_to_running_or_cancelled():
 
 @pytest.mark.parametrize(
     "target",
-    [AGENT_RUN_COMPLETED, AGENT_RUN_PARTIAL_SUCCESS, AGENT_RUN_FAILED, AGENT_RUN_TIMEOUT, AGENT_RUN_CANCELLED],
+    [
+        AGENT_RUN_COMPLETED,
+        AGENT_RUN_PARTIAL_SUCCESS,
+        AGENT_RUN_FAILED,
+        AGENT_RUN_TIMEOUT,
+        AGENT_RUN_CANCELLED,
+    ],
 )
 def test_running_reaches_every_documented_outcome(target: str):
     assert can_transition(AGENT_RUN_RUNNING, target)
@@ -233,14 +241,24 @@ def test_key_includes_pipeline_version():
     from app.analysis.idempotency import IdempotencyInputs
 
     base = IdempotencyInputs(
-        project_id=1, source_id=2,
-        time_range_start=T0.isoformat(), time_range_end=(T0 + timedelta(hours=1)).isoformat(),
-        filters={}, domain_id="d", domain_version="1.0.0", pipeline_version="1.0.0",
+        project_id=1,
+        source_id=2,
+        time_range_start=T0.isoformat(),
+        time_range_end=(T0 + timedelta(hours=1)).isoformat(),
+        filters={},
+        domain_id="d",
+        domain_version="1.0.0",
+        pipeline_version="1.0.0",
     )
     other = IdempotencyInputs(
-        project_id=1, source_id=2,
-        time_range_start=T0.isoformat(), time_range_end=(T0 + timedelta(hours=1)).isoformat(),
-        filters={}, domain_id="d", domain_version="1.0.0", pipeline_version="1.1.0",
+        project_id=1,
+        source_id=2,
+        time_range_start=T0.isoformat(),
+        time_range_end=(T0 + timedelta(hours=1)).isoformat(),
+        filters={},
+        domain_id="d",
+        domain_version="1.0.0",
+        pipeline_version="1.1.0",
     )
     assert compute_idempotency_key(base) != compute_idempotency_key(other)
 
@@ -299,15 +317,27 @@ def test_budget_stop_is_not_retryable():
     assert not is_retryable(StopExecution("call_limit", "到顶"))
 
 
-def test_structured_output_failure_is_validation_not_retryable():
-    """同一模型同一提示重试通常还是给不出合法 JSON。"""
-    assert classify_error(StructuredOutputError("no json")) == ErrorKind.VALIDATION
-    assert not is_retryable(StructuredOutputError("no json"))
+def test_structured_output_failure_is_retryable_so_the_ladder_can_run():
+    """结构化输出失败必须**可重试**，否则降级链根本没机会生效。
+
+    真机故障（2026-09-23）：L3 输出被 token 上限截断 → JSON 不完整。
+    早先把它归为"校验失败不可重试"，于是 L3 一失败整条链路就直接退到
+    纯规则报告（零结论），L3→L2→L1 的降级链完全没被用上。
+    换等级/换预算是能解决截断的，所以它属于可重试。
+    """
+    assert classify_error(StructuredOutputError("no json")) == ErrorKind.RETRYABLE
+    assert is_retryable(StructuredOutputError("no json"))
+
+
+def test_input_validation_failure_remains_non_retryable():
+    """真正不可重试的是**输入**类校验失败 —— 重试同一份坏输入毫无意义。"""
+    assert not is_retryable(ValidationFailureError("bad input"))
+    assert not is_retryable(InputFormatError("bad format"))
 
 
 def test_unknown_error_is_not_treated_as_retryable():
     """未知错误盲目重试可能放大故障、也可能白花钱。"""
-    assert classify_error(RuntimeError("???") ) == ErrorKind.UNKNOWN
+    assert classify_error(RuntimeError("???")) == ErrorKind.UNKNOWN
     assert not is_retryable(RuntimeError("???"))
 
 
@@ -359,14 +389,18 @@ def test_non_retryable_error_is_not_retried():
 
 
 def test_backoff_is_exponential_and_capped():
-    policy = RetryPolicy(base_delay_seconds=1.0, max_delay_seconds=8.0, jitter_ratio=0.0)
+    policy = RetryPolicy(
+        base_delay_seconds=1.0, max_delay_seconds=8.0, jitter_ratio=0.0
+    )
     assert [policy.delay_for(i) for i in (1, 2, 3, 4, 5)] == [1.0, 2.0, 4.0, 8.0, 8.0]
 
 
 def test_backoff_has_jitter_so_retries_do_not_synchronize():
     """没有抖动，同时失败的调用会在同一刻一起重试，把限流的服务再打一次。"""
     policy = RetryPolicy(base_delay_seconds=4.0, jitter_ratio=0.25)
-    delays = {round(policy.delay_for(1, rng=random.Random(seed)), 4) for seed in range(20)}
+    delays = {
+        round(policy.delay_for(1, rng=random.Random(seed)), 4) for seed in range(20)
+    }
     assert len(delays) > 1, "延迟没有抖动"
     assert all(3.0 <= d <= 5.0 for d in delays)
 
@@ -468,6 +502,35 @@ def test_non_retryable_error_aborts_the_ladder():
     assert tried == ["L3"], f"不该继续降级，实际尝试了 {tried}"
 
 
+def test_storage_failure_is_non_retryable_and_carries_its_own_kind():
+    """落库失败必须单独成类，且**不许**继续降级。
+
+    真机故障：结论因 CHECK 约束写不进去。若把它当"未知错误"，降级链会
+    继续往 L2→L1 各再调一次模型 —— 每次产出的都是同一份写不进去的结论，
+    三次模型钱全白花，而真正的原因（写库失败）被埋在最里层。
+    它发生在"钱已经花完"之后，所以只能立刻收尾并如实报出来。
+    """
+    exc = StorageFailureError("结论落库失败：IntegrityError")
+    assert classify_error(exc) == ErrorKind.STORAGE
+    assert ErrorKind.STORAGE not in RETRYABLE_KINDS
+    assert not is_retryable(exc)
+
+    tried: list[str] = []
+
+    def attempt(tier: str) -> str:
+        tried.append(tier)
+        raise StorageFailureError("写不进去")
+
+    outcome = call_with_fallback(
+        attempt, start_tier="L3", retry_policy=RetryPolicy(max_retries=2)
+    )
+    assert outcome.ok is False
+    assert tried == ["L3"], f"落库失败不该再降级烧钱，实际尝试了 {tried}"
+    # stop_reason 要是 storage 本身，而不是笼统的 model_unavailable ——
+    # 否则排障方向会被带偏到"模型不可用"上去。
+    assert outcome.stop_reason == ErrorKind.STORAGE
+
+
 def test_fallback_outcome_is_serializable():
     import json
 
@@ -518,7 +581,9 @@ def test_fresh_heartbeat_is_not_a_zombie():
 
 
 def test_exactly_at_timeout_is_not_yet_a_zombie():
-    assert not is_zombie(_record(), now=T0 + timedelta(seconds=300), timeout_seconds=300)
+    assert not is_zombie(
+        _record(), now=T0 + timedelta(seconds=300), timeout_seconds=300
+    )
 
 
 def test_queued_run_without_heartbeat_is_not_a_zombie():
@@ -554,7 +619,9 @@ def test_naive_heartbeat_is_handled():
 
 
 def test_heartbeat_deadline_is_reported():
-    assert heartbeat_deadline(started_at=T0, timeout_seconds=300) == T0 + timedelta(seconds=300)
+    assert heartbeat_deadline(started_at=T0, timeout_seconds=300) == T0 + timedelta(
+        seconds=300
+    )
 
 
 def test_cancel_check_raises_when_requested():

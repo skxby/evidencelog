@@ -90,6 +90,30 @@ def test_insight_types_and_root_cause_restriction():
     assert enums.INSIGHT_ROOT_CAUSE_ALLOWED_TYPES == {"inference", "possibility"}
 
 
+def test_unknown_is_a_storable_insight_type():
+    """计划第 811、829–836 行的**第四层**语义必须能落库。
+
+    真机故障：模型按 schema 给出 type="unknown" 的合法结论，而
+    `insights.type` 的 CHECK 只认三值 → 插入被拒 → 任务崩溃。
+    schema（第 811 行）、prompt、报告页（第 836 行「− 未知」）都已实现第四层，
+    约束里少这一个值，等于把合法输出变成运行时错误。
+    """
+    assert enums.INSIGHT_TYPE_UNKNOWN == "unknown"
+    assert "unknown" in enums.INSIGHT_TYPES
+    assert "'unknown'" in enums.insight_type_check_sql()
+
+
+def test_valid_insight_types_has_a_single_definition():
+    """校验层与模型层必须共用同一份类型清单。
+
+    抄两份就必然漂移：`evidence.py` 认 4 种、数据库约束只认 3 种，
+    于是漂移只在**真机落库那一刻**才炸出来，单测全绿也没用。
+    """
+    from app.analysis.evidence import VALID_INSIGHT_TYPES
+
+    assert VALID_INSIGHT_TYPES == enums.INSIGHT_TYPES
+
+
 def test_data_source_formats_exclude_csv_and_json():
     """§20 不做清单：CSV / JSON 解析明确排除在 V1 之外。"""
     assert enums.DATA_SOURCE_FORMATS == ("txt", "jsonl")
