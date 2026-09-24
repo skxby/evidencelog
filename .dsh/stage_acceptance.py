@@ -179,6 +179,7 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
     gate = ev.get("budget_gate") or {}
     zombie = ev.get("zombie_test") or {}
     cancel = ev.get("cancel_test") or {}
+    degrade = ev.get("degrade_check") or {}
 
     def traced(symbol: str) -> int:
         key = trace_key(symbol)
@@ -210,10 +211,12 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         "达标" if secrets.get("hits") == 0 else "未达标",
         f"扫 app/ 下 sk- 形态字面量：{secrets.get('hits')} 处；配置项逐个确认被读取（settings_usage_audit 无死配置）",
     )
+    migration = ev.get("migration_check") or {}
     out["migrate"] = (
-        "待实测",
-        "alembic upgrade head 在真机执行成功（migrate 容器 Exited(0)）；"
-        "downgrade 没有自动化用例，本轮未实测回滚",
+        "达标" if migration.get("rollback_works") else "待实测",
+        f"临时库上真跑 alembic：`upgrade head` → {migration.get('upgrade_head', {}).get('tables')} 张表；"
+        f"`downgrade base`（退出码 {migration.get('downgrade_base', {}).get('exit')}）→ 业务表全清"
+        f"（只剩 alembic_version）；再 `upgrade head` → 表数复原。主库数据未受影响",
     )
     out["project_source"] = (
         "达标" if real.get("project_id") and real.get("data_source_id") else "未达标",
@@ -349,7 +352,14 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         "达标" if tiny.get("http") == 402 else "未达标",
         f"项目预算 0.001 → HTTP {tiny.get('http')}：{tiny.get('detail')}",
     )
-    out["partial_success"] = ("待实测", "本轮未造出 partial_success 的真机 Run（需策略覆盖把单次上限压到一次调用之下）；单测与集成测试有证据")
+    out["partial_success"] = (
+        "待实测",
+        f"partial_success 状态本身在真机出现过（模型不可用那次：Run "
+        f"{degrade.get('run_id')}，页面/接口带 stop_reason 与「结果可能不完整」的 note）；"
+        "但**极小预算触发**这一条真机没跑出来：这条链路的正常路径一次 Run 只调一次模型，"
+        "mid-check 没有第二次调用可拦 —— 要真机触发得人为造多轮场景"
+        "（输出截断 → 降级重试），本轮没做。单测与集成测试覆盖了控制器判定",
+    )
     bud = real.get("project") or {}
     out["budget_accumulated"] = (
         "达标"
@@ -411,11 +421,20 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         f"状态 {cancel.get('statuses_seen')} → 在下一个检查点收成 {cancel.get('final_status')}；"
         "根因（Worker 全程持未提交事务、取消写入被行锁挡住）已随 checkpoint 提交修掉",
     )
-    out["rules_only"] = ("待实测", "本轮两条真机 Run 都调通了模型；L0 降级路径只有单测/集成测试证据")
+    out["rules_only"] = (
+        "达标"
+        if degrade.get("degraded_as_expected") and degrade.get("used_rules_only")
+        else "待实测",
+        f"真机把 Key 换成无效值：Run {degrade.get('run_id')} → "
+        f"**{degrade.get('status')}** + stop_reason={degrade.get('stop_reason')}，"
+        f"used_rules_only={degrade.get('used_rules_only')}、花费 ¥{degrade.get('cost')}"
+        f"（错误原文：“{degrade.get('error')}”）——"
+        "模型没跑这件事不会再伪装成“分析完成、没发现异常”",
+    )
     out["error_classify"] = (
-        "待实测" if not traced("app.analysis.idempotency.classify_error") else "达标",
-        f"classify_error 本轮真机执行 {traced('app.analysis.idempotency.classify_error')} 次"
-        "（两条 Run 均成功，未触发失败分类路径）",
+        "达标" if degrade.get("error_kinds") else "待实测",
+        f"classify_error 在真机上跑过：降级那次的等级尝试留下 error_kind="
+        f"{degrade.get('error_kinds')}（不可重试的错误不会被无谓重试）",
     )
     l0 = _scenario(ev, "evidence-empty-l0")
     out["tier_l0"] = ("达标", "空数据源的真机 Run 走 L0（model_attempts=0、cost=0），等级判定在链路内执行")
@@ -486,11 +505,18 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         "达标" if not dangling and int((real.get("counts") or {}).get("evidences") or 0) > 0 else "未达标",
         f"证据条数 {((real.get('counts') or {}).get('evidences'))}，引用的 event_id 全部落在本次事件集合内",
     )
-    retry = contract.get("retry") or {}
+    retry = ev.get("retry_check") or {}
     out["retry_entry"] = (
-        "待实测",
-        f"重试端点存在且对不可重试状态给明确原因（{str(retry.get('body'))[:80]}）；"
-        "但本轮没有造出 failed/partial_success 的 Run，重试成功路径未在真机验证",
+        "达标" if retry.get("retry_entry_ok") else "待实测",
+        f"真机：对一条 {retry.get('source_status')} 的 Run（{retry.get('source_run_id')}）"
+        f"走「重新分析」→ HTTP {retry.get('retry_http')}，新 Run {retry.get('new_run_id')} 的 "
+        f"parent_run_id={retry.get('new_run_parent')}。"
+        + (
+            "复验时还发现并修掉一处：不填时间范围发起的 Run 快照里 `time_range` 是 null，"
+            "重试必然 422 —— 现在创建时就把**生效的**窗口写进快照"
+            if retry.get("retry_entry_ok")
+            else ""
+        ),
     )
     narrative = real.get("narrative") or ""
     out["narrative"] = (
@@ -746,6 +772,11 @@ def main(argv: list[str]) -> int:
         "python .dsh/budget_gate_check.py              # 成本闸门：四项 + 月度预算跨月 + 峰谷价",
         "python .dsh/runbook_probe.py <project_id>     # runbook 为什么挂不上",
         "python .dsh/cancel_stale_probe.py <run_id>    # 取消为什么慢一步（行锁）",
+        "python .dsh/history_probe.py <project_id>     # 历史事故有没有真的注入 Context",
+        "python .dsh/knowledge_loop_probe.py <project_id>  # 知识闭环：候选→确认→下次命中",
+        "python .dsh/edge_scenarios.py --migration     # 迁移可回滚（临时库，零成本）",
+        "python .dsh/edge_scenarios.py --degrade       # 模型不可用 → 降级（换无效 Key，零成本）",
+        "python .dsh/edge_scenarios.py --retry-existing <run_id>   # 重新分析入口",
         "",
         "# ② 出表",
         "python .dsh/stage_acceptance.py",

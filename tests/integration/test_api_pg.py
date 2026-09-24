@@ -788,3 +788,60 @@ def test_run_creation_commits_before_dispatching(client: TestClient):
         f"派发时事件对独立会话不可见（读到 {observed['events']} 条）—— "
         "worker 会因此把有崩溃的日志判成 L0，产出零结论的『已完成』报告"
     )
+
+
+# ============================================================
+# 回归（2026-09-24 真机核验）：「重新分析」要能重建**生效的**时间窗
+# ============================================================
+
+
+def test_retry_rebuilds_the_effective_time_range(client: TestClient):
+    """不填时间范围发起的 Run，也要能「重新分析」。
+
+    真机核验：界面不填时间范围时，原始请求里 `time_range` 是 null，
+    API 会用 `_epoch()..now` 兜底；但快照只照抄了原始请求 →
+    重试解析时间窗必然失败，返回 422「原 Run 的时间范围无法解析」——
+    即重试入口对**最常见**的发起方式不可用。
+    """
+    from unittest.mock import patch
+
+    headers = _register(client)
+    project_id = _make_project(client, headers)
+    source = client.post(
+        f"/api/projects/{project_id}/data-sources", json={"format": "txt"}, headers=headers
+    )
+    assert source.status_code == 201, source.text
+    source_id = source.json()["id"]
+
+    with patch("app.api.routes_runs._dispatch"):
+        created = client.post(
+            f"/api/projects/{project_id}/analysis-runs",
+            json={"data_source_id": source_id},  # 刻意不给 time_range
+            headers=headers,
+        )
+    assert created.status_code == 202, created.text
+    run_id = created.json()["run_id"]
+
+    # 快照里必须记下**生效的**窗口（而不是 null）
+    with SessionLocal() as session:
+        stored = session.execute(
+            text("SELECT input -> 'time_range' FROM agent_runs WHERE id = :i"), {"i": run_id}
+        ).scalar_one()
+    assert stored, f"快照里没记生效时间窗：{stored!r}"
+
+    # 让它可重试，然后再走一次真实的重试入口
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE agent_runs SET status = 'partial_success' WHERE id = :i"),
+            {"i": run_id},
+        )
+    with patch("app.api.routes_runs._dispatch"):
+        retried = client.post(f"/api/runs/{run_id}/retry", headers=headers)
+
+    assert retried.status_code == 202, f"重试被拒：{retried.text}"
+    new_run_id = retried.json()["run_id"]
+    with SessionLocal() as session:
+        parent = session.execute(
+            text("SELECT parent_run_id FROM agent_runs WHERE id = :i"), {"i": new_run_id}
+        ).scalar_one()
+    assert parent == run_id, "新 Run 必须用 parent_run_id 指回原 Run"

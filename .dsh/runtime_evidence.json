@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-09-24T21:33:20",
+ "generated_at": "2026-09-24T21:45:10",
  "base": "http://127.0.0.1:8001",
  "scenarios": [
   {
@@ -3612,5 +3612,66 @@
    }
   },
   "confirmed_knowledge_loaded": 1
+ },
+ "migration_check": {
+  "scratch_database": "logagent_migtest",
+  "upgrade_head": {
+   "exit": 0,
+   "tables": 10
+  },
+  "downgrade_base": {
+   "exit": 0,
+   "tables": 1
+  },
+  "upgrade_again": {
+   "exit": 0,
+   "tables": 10
+  },
+  "rollback_works": true,
+  "tail": [
+   "INFO  [alembic.runtime.migration] Running downgrade f893dcf4c86d -> 1228560be2d2, stage11_add_insight_run_metadata",
+   "INFO  [alembic.runtime.migration] Running downgrade 1228560be2d2 -> 080803e99048, stage08_add_cancel_requested",
+   "INFO  [alembic.runtime.migration] Running downgrade 080803e99048 -> , stage02_nine_tables"
+  ]
+ },
+ "degrade_check": {
+  "run_id": 3712,
+  "project_id": 8105,
+  "status": "partial_success",
+  "stop_reason": "model_unavailable",
+  "note": "分析因预算/时限/模型不可用中断，结果可能不完整",
+  "used_rules_only": true,
+  "error": "全部模型等级不可用，已输出纯规则报告",
+  "model_calls": 0,
+  "cost": 0.0,
+  "error_kinds": [
+   "retryable"
+  ],
+  "degraded_as_expected": true
+ },
+ "partial_retry_check": {
+  "run_id": 3707,
+  "project_id": 8102,
+  "final_status": "completed",
+  "run_metadata": {
+   "status": "completed",
+   "stop_reason": null,
+   "cost_actual": 0.02155,
+   "tokens_input": 1642
+  },
+  "narrative_head": "Run #3707（项目 8102，trace f621f2342a6e4af0815a2617b1c695d8） 状态 completed。\n开始于 2026-09-24T13:41:50.023643+00:00，耗时 18.4s。\n共调用模型 1 次，输入 1642 / 输出 4977 tokens，花费 ¥0.0215。\n分级花费：L3 1 次 ¥0",
+  "retry_http": 422,
+  "retry_run_id": null,
+  "retry_parent_run_id": null,
+  "partial_and_retry_ok": false
+ },
+ "retry_check": {
+  "source_run_id": 3710,
+  "source_status": "partial_success",
+  "retry_http": 202,
+  "retry_detail": "None",
+  "new_run_id": 3711,
+  "new_run_parent": 3710,
+  "retry_entry_ok": true
  }
 }

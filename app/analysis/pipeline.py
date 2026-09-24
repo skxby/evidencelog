@@ -154,6 +154,13 @@ class PipelineResult:
     model_attempts: list[dict[str, Any]] = field(default_factory=list)
     #: 工具执行记录（阶段 05 验收：执行结果可记录到 Run）
     tool_runs: list[dict[str, Any]] = field(default_factory=list)
+    #: 模型调用**失败**后退化成纯规则报告（区别于"本来就该走 L0"）。
+    #: 两者都会产生 `rules_only_report`，但对 Run 状态的含义完全不同：
+    #: 前者必须标 `partial_success` + `model_unavailable`（计划第 724 行），
+    #: 后者是正常的 L0 完成。没有这个标记的话，两者在真机上分不开 ——
+    #: 真机核验（2026-09-24）：Key 无效时 Run 被标成 `completed`、
+    #: 零结论零花费，看起来像"分析跑完了没发现异常"。
+    model_unavailable: bool = False
     evidence_rejections: int = 0
     notes: list[str] = field(default_factory=list)
     valid_event_ids: list[str] = field(default_factory=list)
@@ -774,6 +781,10 @@ def _run_model_analysis(
             result.notes.append(
                 f"模型调用失败（{type(exc).__name__}: {exc}），已降级为纯规则报告"
             )
+            # 打标记：这条纯规则报告是**失败换来的**，不是"本来就该走 L0"。
+            # 调用方据此把 Run 收成 partial_success + model_unavailable，
+            # 而不是 completed —— 后者会让"模型没跑"看起来像"没发现异常"。
+            result.model_unavailable = True
             result.rules_only_report = _build_rules_only_report(
                 statistics=result.statistics,
                 groups=result.groups,

@@ -201,6 +201,18 @@ def _execute(
             # 8.1 知识闭环只剩"人工确认"这一半 —— 没有候选可确认。
             _stage_knowledge_candidates(domain, result, run_id=run_id)
 
+            # 模型调用失败换来的纯规则报告：这一级算**失败**，交给降级链继续
+            # 尝试其它等级，全都不行时再由 `rules_only()` 产出最终报告 ——
+            # 那样 Run 才会被如实收成 `partial_success` + `model_unavailable`
+            # （计划第 724 行）。不抛的话它会以 `completed` 收场，
+            # 用户看到的是一份"没有异常"的干净报告（真机核验 2026-09-24）。
+            if getattr(result, "model_unavailable", False):
+                from app.gateways.base import ModelUnavailableError
+
+                raise ModelUnavailableError(
+                    "模型调用失败，本级只产出纯规则报告；交由降级链继续尝试其它等级"
+                )
+
             if result.stop_reason:
                 # 策略到顶：把**已经拿到的结论落库之后**再上抛，
                 # 让 executor 按计划第 647–648 行把状态收成 partial_success

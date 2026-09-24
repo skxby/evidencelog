@@ -161,6 +161,16 @@ def create_analysis_run(
             raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
                                 detail=pre.message or pre.reason)
 
+    # 快照要记**生效的**时间窗，而不是照抄原始请求。
+    #
+    # 原始请求里 `time_range` 可以是 null（界面不填就是"全部事件"），API 会用
+    # `_epoch()..now` 兜底 —— 但那只是本次请求的局部变量，不写进快照的话
+    # 「重新分析」拿到的就是 `{"time_range": null}`，解析必然失败：
+    # 真机核验（2026-09-24）实测到 422「原 Run 的时间范围无法解析」，
+    # 即"重试入口存在但对最常见的发起方式不可用"。
+    run_input = payload.model_dump(mode="json")
+    run_input["time_range"] = {"start": start.isoformat(), "end": end.isoformat()}
+
     request = RunRequest(
         project_id=scope.project_id,
         source_id=int(source.id),
@@ -170,7 +180,7 @@ def create_analysis_run(
         domain_version=domain.version,
         filters=filters,
         start_tier=payload.start_tier or "L2",
-        run_input=payload.model_dump(mode="json"),
+        run_input=run_input,
     )
 
     runs = AgentRunRepository(session)

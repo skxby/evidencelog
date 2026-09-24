@@ -243,15 +243,17 @@ E2E      容器全栈 16/16；真实调用 1607/3058 tokens、¥0.0138、7 条�
 真机分析 真实语料 Mac_2k 2000 事件 → 15 结论 15 证据、1848 个事件分组、593 条事故
 成本闸门 真实花掉 ¥0.0167 → 库里「本月已花」同步 → 再发起被 402 拦下；上月花满 → 放行
 可靠性   分析中调取消 → running→cancelled；冻结 Worker → 维护队列把 Run 收成 timeout
+降级     Key 换成无效值 → partial_success + model_unavailable + 纯规则报告（¥0，不再假装"没发现异常"）
+重建     临时库 upgrade → downgrade base → upgrade 全通过；不填时间范围的 Run 也能「重新分析」
 知识闭环 候选 4 条进 staging → 确认一条 → 下一次分析加载 confirmed 知识 1 条
 工具用量 Run.tool_usage 记录 event_filter / stats_calculator 的耗时与输入条数
-全量     pytest 752 passed / 3 skipped（跳过的是需 RUN_LIVE_MODEL_TESTS=1 的付费用例）
-验收     60 条验收：52 达标 / 8 待实测 / 0 真机未达标
+全量     pytest 753 passed / 3 skipped（跳过的是需 RUN_LIVE_MODEL_TESTS=1 的付费用例）
+验收     60 条验收：56 达标 / 4 待实测 / 0 真机未达标
 ```
 
-> ℹ️ **8 条"待实测"**（不是缺陷，是没取到证据的场景：迁移回滚、partial_success、
-> L0 降级、错误分类、L1 样本、假 event_id、失败重试入口、全新 clone）
-> 逐条列在《[真机核验报告-2026-09-24.md](真机核验报告-2026-09-24.md)》第 4 节。
+> ℹ️ **4 条"待实测"**（不是缺陷，是没取到证据的场景：极小预算触发 partial_success、
+> L1 样本、假 event_id、全新 clone）逐条列在
+> 《[真机核验报告-2026-09-24.md](真机核验报告-2026-09-24.md)》第 4 节，各自写清了缺什么。
 > 首轮查出的 11 条真机未达标已全部修复并逐条真机复验（报告第 0 节）。
 
 > `logs/` 是外部公开真实日志语料（出处见 `logs/README.md`），已在版本库内，
