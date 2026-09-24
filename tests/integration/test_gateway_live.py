@@ -15,6 +15,7 @@ $env:RUN_LIVE_MODEL_TESTS = "1"
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any
 
 import pytest
@@ -39,6 +40,22 @@ ANSWER_SCHEMA: dict[str, Any] = {
 
 def _live_enabled() -> bool:
     return os.environ.get("RUN_LIVE_MODEL_TESTS") == "1"
+
+
+def _say(text: str) -> None:
+    """打印真实调用的结果，**不因控制台编码而失败**。
+
+    这条测试默认 Windows 控制台是 GBK，`¥` 直接 `print` 会抛
+    `UnicodeEncodeError: 'gbk' codec can't encode character '\\xa5'` ——
+    最讽刺的是钱已经花了、模型也答对了，测试却"失败"在一个打印语句上，
+    看上去像网关坏了。所以打印必须自己兜住编码，而不是让排障的人去猜。
+    """
+    stream = getattr(sys.stdout, "buffer", None)
+    if stream is None:  # pragma: no cover - 被重定向到非二进制流时退回安全打印
+        print(text.encode("ascii", "backslashreplace").decode("ascii"))
+        return
+    stream.write((text + "\n").encode("utf-8", "replace"))
+    stream.flush()
 
 
 @pytest.fixture()
@@ -90,13 +107,13 @@ def test_live_gateway_returns_structured_result(live_settings, live_gateway):
     # 服务端回报的型号应该等于配置里的 L1 型号
     assert result.model == live_settings.model_l1
 
-    print(
+    _say(
         f"\n[live] model={result.model} tier={result.tier} "
         f"tokens_in={result.tokens_input} tokens_out={result.tokens_output} "
         f"cached={result.cached_tokens} reasoning={result.reasoning_tokens} "
         f"cost=¥{result.cost:.6f}"
     )
-    print(f"[live] parsed={result.parsed}")
+    _say(f"[live] parsed={result.parsed}")
 
 
 def test_live_l0_still_refuses_to_call_the_model(live_settings, live_gateway):

@@ -82,6 +82,38 @@ def test_syslog_with_extra_bracket_group_is_parsed():
     assert raw["extra"] == "31211"
 
 
+def test_syslog_with_dotted_parenthetical_group_is_parsed():
+    """macOS launchd 的附注组**不带方括号**，且是点分域名：
+
+    `com.apple.xpc.launchd[1] (com.apple.xpc.launchd.domain.pid.WebContent.32502): ...`
+
+    真实日志里这类行有 19/2000（log-parser-eval 实测），早先全部判成坏行。
+    它们恰恰指明了"哪个进程崩溃/被拒"，是排障最需要的那几行。
+    """
+    raw = parse_syslog_line(
+        "Jul  2 16:55:53 host com.apple.xpc.launchd[1] "
+        "(com.apple.xpc.launchd.domain.pid.WebContent.32502): "
+        "Path not allowed in target domain"
+    )
+    assert raw is not None
+    assert raw["proc"] == "com.apple.xpc.launchd"
+    assert raw["pid"] == 1
+    assert raw["extra"] == "com.apple.xpc.launchd.domain.pid.WebContent.32502"
+    assert raw["msg"].startswith("Path not allowed")
+
+
+def test_parenthetical_inside_message_is_not_eaten_as_extra():
+    """message 自己以括号开头时不能被当成附注组。
+
+    `proc[1]: (note) 出事了` —— 冒号紧跟 pid，附注组分支匹配不到，
+    msg 必须完整保留 `(note) 出事了`。加附注分支最容易踩的就是这里。
+    """
+    raw = parse_syslog_line("Jul  2 12:00:00 host kernel[1]: (note) 出事了")
+    assert raw is not None
+    assert raw["extra"] is None
+    assert raw["msg"] == "(note) 出事了"
+
+
 def test_syslog_multi_word_process_name_is_parsed():
     """`Microsoft Word[912]: ...` 这类多词进程名。"""
     raw = parse_syslog_line(

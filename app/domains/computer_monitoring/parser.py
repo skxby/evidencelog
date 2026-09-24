@@ -46,6 +46,12 @@ _RE_SYSLOG_REST = re.compile(
     r"^\s*(?P<proc>[^\[\]:]*?)"
     r"(?:\s*\[(?P<pid>\d+)\])?"
     r"(?:\s*\(\[(?P<extra>\d+)\]\))?"
+    # 附注组还有**不带方括号**的形态，macOS launchd 就是：
+    #   `com.apple.xpc.launchd[1] (com.apple.xpc.launchd.domain.pid.WebContent.32502): ...`
+    # 早先只认 `([31211])` 这一种，于是 Mac 真实日志里这类行整批判成坏行
+    # （实测 19/2000）。它们恰恰是"哪个进程崩了"的关键行，丢掉可惜。
+    # 必须排在 `[pid]` 之后：`([31211])` 会被更靠前的分支优先吃掉，语义不变。
+    r"(?:\s*\((?P<extra_text>[^()]+)\))?"
     r"\s*:\s?(?P<msg>.*)$"
 )
 
@@ -132,7 +138,7 @@ def parse_syslog_line(
         "host": match.group("host"),
         "proc": rest.group("proc"),
         "pid": int(pid_raw) if pid_raw is not None else None,
-        "extra": rest.group("extra"),
+        "extra": rest.group("extra") or rest.group("extra_text"),
         "msg": rest.group("msg").strip(),
         "format": "syslog",
     }
