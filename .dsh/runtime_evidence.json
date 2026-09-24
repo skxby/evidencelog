@@ -1,0 +1,2584 @@
+{
+ "generated_at": "2026-09-24T20:03:47",
+ "base": "http://127.0.0.1:8001",
+ "scenarios": [
+  {
+   "name": "evidence-real-corpus",
+   "source": "logs/Mac_2k.log",
+   "canary_injected": true,
+   "project_id": 6943,
+   "data_source_id": 4929,
+   "run_id": 3023,
+   "create_run_http": 202,
+   "create_run_seconds": 0.275,
+   "create_run_body": {
+    "run_id": 3023,
+    "status": "queued",
+    "reused": false
+   },
+   "upload_http": 200,
+   "upload": {
+    "data_source_id": 4929,
+    "created_data_source": true,
+    "format": "txt",
+    "stored_filename": "20260924114247239914_Mac_2k_with_canary.log",
+    "events_persisted": 2000,
+    "parse": {
+     "parser": "txt",
+     "total_lines": 2000,
+     "parsed": 2000,
+     "bad_lines": 0,
+     "skipped": 0,
+     "merged": 0,
+     "bad_line_rate": 0.0,
+     "bad_line_samples": []
+    },
+    "mask": {
+     "total": 14,
+     "by_rule": {
+      "email": 12,
+      "secret_generic": 1,
+      "secret_openai": 1
+     }
+    }
+   },
+   "final_status": "completed",
+   "run_row": {
+    "parent_run_id": null,
+    "status": "completed",
+    "current_phase": null,
+    "phase_history": [
+     {
+      "at": "2026-09-24T11:42:55.377689+00:00",
+      "from": "queued",
+      "phase": "running",
+      "status": "running"
+     },
+     {
+      "at": "2026-09-24T11:43:21.740887+00:00",
+      "from": "running",
+      "phase": "completed",
+      "status": "completed"
+     }
+    ],
+    "started_at": null,
+    "finished_at": "2026-09-24 11:43:21.741027+00:00",
+    "last_heartbeat": "2026-09-24 11:43:21.732200+00:00",
+    "model_calls": [
+     {
+      "cost": 0.023662,
+      "tier": "L3",
+      "model": "deepseek-flash",
+      "status": "ok",
+      "call_id": "c_f5c15be02c14",
+      "timestamp": "2026-09-24T11:43:21.655819+00:00",
+      "tokens_input": 6366,
+      "cached_tokens": 0,
+      "tokens_output": 4324,
+      "reasoning_tokens": 1589
+     }
+    ],
+    "tool_usage": null,
+    "tokens_input": 6366,
+    "tokens_output": 4324,
+    "cost_actual": "0.023662",
+    "error": null,
+    "run_metadata": {
+     "attempts": [
+      {
+       "ok": true,
+       "tier": "L2",
+       "error": null,
+       "retry": {
+        "ok": true,
+        "history": [
+         {
+          "error": "",
+          "attempt": 1,
+          "error_kind": "ok",
+          "delay_before": 0.0
+         }
+        ],
+        "attempts": 1,
+        "last_error": null
+       },
+       "error_kind": null
+      }
+     ],
+     "trace_id": "13e7167600194d14b763154919ab7774",
+     "insight_count": 12,
+     "context_tokens": 6948,
+     "evidence_count": 12,
+     "model_attempts": [
+      {
+       "cost": 0.023662,
+       "round": 1,
+       "tokens_input": 6366,
+       "tokens_output": 4324
+      }
+     ],
+     "skipped_phases": [],
+     "used_rules_only": false,
+     "completed_phases": []
+    }
+   },
+   "trace_id": "13e7167600194d14b763154919ab7774",
+   "project": {
+    "budget_total": 10.0,
+    "budget_used": 0.0237
+   },
+   "counts": {
+    "events": 2000,
+    "event_groups": 0,
+    "incidents": 0,
+    "insights": 12,
+    "evidences": 12,
+    "fact_without_evidence": 0,
+    "cited_event_ids_not_in_run": [],
+    "metric_events": 0,
+    "db_events_with_plaintext": 0
+   },
+   "insights": [
+    {
+     "id": 630,
+     "type": "fact",
+     "severity": "high",
+     "confidence": 0.95,
+     "title": "窗口内共 5 条 high 级 ProcessCrash 异常事件",
+     "run_metadata": null
+    },
+    {
+     "id": 631,
+     "type": "inference",
+     "severity": "low",
+     "confidence": 0.8,
+     "title": "4/5 条 high 级 ProcessCrash 疑似关键词误报（CoreCapture 归档日志）",
+     "run_metadata": null
+    },
+    {
+     "id": 632,
+     "type": "inference",
+     "severity": "medium",
+     "confidence": 0.85,
+     "title": "mDNSResponder 连接被拒错误长期反复出现",
+     "run_metadata": null
+    },
+    {
+     "id": 633,
+     "type": "inference",
+     "severity": "medium",
+     "confidence": 0.8,
+     "title": "网络可达性间歇性中断（无路由 / 网络不可达）",
+     "run_metadata": null
+    },
+    {
+     "id": 634,
+     "type": "inference",
+     "severity": "medium",
+     "confidence": 0.8,
+     "title": "SOS 账户身份未设置导致 Keychain 圈同步持续失败",
+     "run_metadata": null
+    },
+    {
+     "id": 635,
+     "type": "inference",
+     "severity": "low",
+     "confidence": 0.75,
+     "title": "图像合成持续失败（ISGenerateImageOp）",
+     "run_metadata": null
+    },
+    {
+     "id": 636,
+     "type": "inference",
+     "severity": "low",
+     "confidence": 0.75,
+     "title": "NetworkAnalyticsEngine 主键哈希失败并丢弃采集记录",
+     "run_metadata": null
+    },
+    {
+     "id": 637,
+     "type": "inference",
+     "severity": "low",
+     "confidence": 0.7,
+     "title": "pid 445 的 datagram ping 超时反复发生",
+     "run_metadata": null
+    },
+    {
+     "id": 638,
+     "type": "fact",
+     "severity": "medium",
+     "confidence": 0.9,
+     "title": "出现两处内核/驱动层断言失败",
+     "run_metadata": null
+    },
+    {
+     "id": 639,
+     "type": "fact",
+     "severity": "medium",
+     "confidence": 0.9,
+     "title": "日志时间戳存在多处不一致",
+     "run_metadata": null
+    },
+    {
+     "id": 640,
+     "type": "possibility",
+     "severity": "high",
+     "confidence": 0.4,
+     "title": "存在未判定的进程崩溃链",
+     "run_metadata": null
+    },
+    {
+     "id": 641,
+     "type": "unknown",
+     "severity": "medium",
+     "confidence": 0.2,
+     "title": "ProcessCrash 事故的真实根因未知",
+     "run_metadata": null
+    }
+   ],
+   "narrative": "Run #3023（项目 6943，trace 13e7167600194d14b763154919ab7774） 状态 completed。\n共调用模型 1 次，输入 6366 / 输出 4324 tokens，花费 ¥0.0237。\n分级花费：L3 1 次 ¥0.0237。\n发生过 1 次模型降级。\n产出 12 条结论：\n  - [fact] 窗口内共 5 条 high 级 ProcessCrash 异常事件（5 条证据）\n  - [inference] 4/5 条 high 级 ProcessCrash 疑似关键词误报（CoreCapture 归档日志）（5 条证据）\n  - [inference] mDNSResponder 连接被拒错误长期反复出现（11 条证据）\n  - [inference] 网络可达性间歇性中断（无路由 / 网络不可达）（8 条证据）\n  - [infere",
+   "api_insights": 12,
+   "disk": {
+    "dir": "data/uploads/6943",
+    "files": [
+     "20260924114247239914_Mac_2k_with_canary.log"
+    ],
+    "canary_email_on_disk": false,
+    "canary_secret_on_disk": false,
+    "email_markers": 12,
+    "secret_markers": 2,
+    "lines": 3999
+   },
+   "staging_file_exists": false
+  },
+  {
+   "name": "evidence-crash-fixture",
+   "source": "tests/datasets/crash/system.log",
+   "canary_injected": false,
+   "project_id": 6944,
+   "data_source_id": 4930,
+   "run_id": 3024,
+   "create_run_http": 202,
+   "create_run_seconds": 0.083,
+   "create_run_body": {
+    "run_id": 3024,
+    "status": "queued",
+    "reused": false
+   },
+   "upload_http": 200,
+   "upload": {
+    "data_source_id": 4930,
+    "created_data_source": true,
+    "format": "txt",
+    "stored_filename": "20260924114323977557_system.log",
+    "events_persisted": 16,
+    "parse": {
+     "parser": "txt",
+     "total_lines": 16,
+     "parsed": 16,
+     "bad_lines": 0,
+     "skipped": 0,
+     "merged": 0,
+     "bad_line_rate": 0.0,
+     "bad_line_samples": []
+    },
+    "mask": {
+     "total": 0,
+     "by_rule": {}
+    }
+   },
+   "final_status": "completed",
+   "run_row": {
+    "parent_run_id": null,
+    "status": "completed",
+    "current_phase": null,
+    "phase_history": [
+     {
+      "at": "2026-09-24T11:43:24.153417+00:00",
+      "from": "queued",
+      "phase": "running",
+      "status": "running"
+     },
+     {
+      "at": "2026-09-24T11:43:53.409356+00:00",
+      "from": "running",
+      "phase": "completed",
+      "status": "completed"
+     }
+    ],
+    "started_at": null,
+    "finished_at": "2026-09-24 11:43:53.409571+00:00",
+    "last_heartbeat": "2026-09-24 11:43:53.401345+00:00",
+    "model_calls": [
+     {
+      "cost": 0.029607,
+      "tier": "L3",
+      "model": "deepseek-flash",
+      "status": "ok",
+      "call_id": "c_85cf34156a0f",
+      "timestamp": "2026-09-24T11:43:53.361559+00:00",
+      "tokens_input": 1607,
+      "cached_tokens": 0,
+      "tokens_output": 7000,
+      "reasoning_tokens": 5537
+     }
+    ],
+    "tool_usage": null,
+    "tokens_input": 1607,
+    "tokens_output": 7000,
+    "cost_actual": "0.029607",
+    "error": null,
+    "run_metadata": {
+     "attempts": [
+      {
+       "ok": true,
+       "tier": "L2",
+       "error": null,
+       "retry": {
+        "ok": true,
+        "history": [
+         {
+          "error": "",
+          "attempt": 1,
+          "error_kind": "ok",
+          "delay_before": 0.0
+         }
+        ],
+        "attempts": 1,
+        "last_error": null
+       },
+       "error_kind": null
+      }
+     ],
+     "trace_id": "7c1e646d358043dcb25e8996fa5536d4",
+     "insight_count": 7,
+     "context_tokens": 1074,
+     "evidence_count": 7,
+     "model_attempts": [
+      {
+       "cost": 0.029607,
+       "round": 1,
+       "tokens_input": 1607,
+       "tokens_output": 7000
+      }
+     ],
+     "skipped_phases": [],
+     "used_rules_only": false,
+     "completed_phases": []
+    }
+   },
+   "trace_id": "7c1e646d358043dcb25e8996fa5536d4",
+   "project": {
+    "budget_total": 10.0,
+    "budget_used": 0.0296
+   },
+   "counts": {
+    "events": 16,
+    "event_groups": 0,
+    "incidents": 0,
+    "insights": 7,
+    "evidences": 7,
+    "fact_without_evidence": 0,
+    "cited_event_ids_not_in_run": [],
+    "metric_events": 0,
+    "db_events_with_plaintext": 0
+   },
+   "insights": [
+    {
+     "id": 642,
+     "type": "fact",
+     "severity": "low",
+     "confidence": 1.0,
+     "title": "样本事件实际时间戳跨越 2026-07-01 至 2026-07-03",
+     "run_metadata": null
+    },
+    {
+     "id": 643,
+     "type": "fact",
+     "severity": "low",
+     "confidence": 1.0,
+     "title": "唯一被 anomalies 列出的 event_id 是 120294",
+     "run_metadata": null
+    },
+    {
+     "id": 644,
+     "type": "inference",
+     "severity": "medium",
+     "confidence": 0.78,
+     "title": "120294 更像名称解析/DNS/mDNS 失败，而非进程崩溃",
+     "run_metadata": null
+    },
+    {
+     "id": 645,
+     "type": "inference",
+     "severity": "low",
+     "confidence": 0.82,
+     "title": "2026-07-01 凌晨存在睡眠/唤醒及网络接口恢复序列",
+     "run_metadata": null
+    },
+    {
+     "id": 646,
+     "type": "inference",
+     "severity": "low",
+     "confidence": 0.65,
+     "title": "NetworkAnalyticsEngine 的 unexpected switch value 2 重复出现",
+     "run_metadata": null
+    },
+    {
+     "id": 647,
+     "type": "possibility",
+     "severity": "low",
+     "confidence": 0.5,
+     "title": "unclassified 事故可能主要是常规低危系统日志聚合",
+     "run_metadata": null
+    },
+    {
+     "id": 648,
+     "type": "unknown",
+     "severity": "low",
+     "confidence": 0.2,
+     "title": "ProcessCrash 事故根因无法判定",
+     "run_metadata": null
+    }
+   ],
+   "narrative": "Run #3024（项目 6944，trace 7c1e646d358043dcb25e8996fa5536d4） 状态 completed。\n共调用模型 1 次，输入 1607 / 输出 7000 tokens，花费 ¥0.0296。\n分级花费：L3 1 次 ¥0.0296。\n发生过 1 次模型降级。\n产出 7 条结论：\n  - [fact] 样本事件实际时间戳跨越 2026-07-01 至 2026-07-03（2 条证据）\n  - [fact] 唯一被 anomalies 列出的 event_id 是 120294（1 条证据）\n  - [inference] 120294 更像名称解析/DNS/mDNS 失败，而非进程崩溃（1 条证据）\n  - [inference] 2026-07-01 凌晨存在睡眠/唤醒及网络接口恢复序列（5 条证据）\n  - [inference] Netw",
+   "api_insights": 7,
+   "disk": {
+    "dir": "data/uploads/6944",
+    "files": [
+     "20260924114323977557_system.log"
+    ],
+    "canary_email_on_disk": false,
+    "canary_secret_on_disk": false,
+    "email_markers": 0,
+    "secret_markers": 0,
+    "lines": 32
+   },
+   "staging_file_exists": false
+  }
+ ],
+ "trace_summary": {
+  "web": {
+   "pid": 16012,
+   "call_count": 56528,
+   "distinct_functions": 382
+  },
+  "worker": {
+   "pid": 10500,
+   "call_count": 59970,
+   "distinct_functions": 353
+  }
+ },
+ "traced_functions": {
+  "app/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/complexity.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/complexity.py::ComplexityAssessment": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/context.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/context.py::ContextBudgetExceededError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/context.py::ContextPart": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/context.py::DistilledContext": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/evidence.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/evidence.py::EvidenceViolationError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/evidence.py::ValidatedInsight": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/evidence.py::ValidationOutcome": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/grouping.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/grouping.py::FormedGroup": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/grouping.py::GroupableEvent": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/grouping.py::MergeCandidate": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/heartbeat.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/heartbeat.py::CancelledError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/heartbeat.py::HeartbeatRecord": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::AuthenticationError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::BudgetExhaustedError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::ErrorKind": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::IdempotencyInputs": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::InputFormatError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::NonRetryableError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::StorageFailureError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::ValidationFailureError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/idempotency.py::canonical_json": {
+   "web": 2
+  },
+  "app/analysis/idempotency.py::compute_idempotency_key": {
+   "web": 2
+  },
+  "app/analysis/idempotency.py::make_idempotency_key": {
+   "web": 2
+  },
+  "app/analysis/idempotency.py::normalize_time_range": {
+   "web": 2
+  },
+  "app/analysis/idempotency.py::one": {
+   "web": 4
+  },
+  "app/analysis/knowledge_staging.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/knowledge_staging.py::KnowledgeStagingError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/persistence.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/persistence.py::EvidencePersistenceError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/persistence.py::PersistenceResult": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/pipeline.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/pipeline.py::PipelineInput": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/pipeline.py::PipelineResult": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/retry.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/retry.py::AttemptRecord": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/retry.py::FallbackAttempt": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/retry.py::FallbackOutcome": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/retry.py::RetryOutcome": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/retry.py::RetryPolicy": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/run_detail.py::<genexpr>": {
+   "web": 7
+  },
+  "app/analysis/run_detail.py::<module>": {
+   "web": 1
+  },
+  "app/analysis/run_detail.py::RunDetail": {
+   "web": 1
+  },
+  "app/analysis/run_detail.py::_evidence_row": {
+   "web": 12
+  },
+  "app/analysis/run_detail.py::_insight_row": {
+   "web": 12
+  },
+  "app/analysis/run_detail.py::as_dict": {
+   "web": 1
+  },
+  "app/analysis/run_detail.py::audit_run_detail": {
+   "web": 1
+  },
+  "app/analysis/run_detail.py::build_run_detail": {
+   "web": 1
+  },
+  "app/analysis/run_detail.py::narrate": {
+   "web": 1
+  },
+  "app/analysis/runner.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/runner.py::RunExecutor": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/runner.py::RunOutcome": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/runner.py::RunRequest": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/runner.py::create_run": {
+   "web": 2
+  },
+  "app/analysis/runner.py::idempotency_key": {
+   "web": 2
+  },
+  "app/analysis/state_machine.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/state_machine.py::IllegalTransitionError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/analysis/state_machine.py::StateMachine": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/api/__init__.py::<module>": {
+   "web": 1
+  },
+  "app/api/deps.py::<module>": {
+   "web": 1
+  },
+  "app/api/deps.py::ProjectScope": {
+   "web": 1
+  },
+  "app/api/deps.py::get_current_user": {
+   "web": 35
+  },
+  "app/api/deps.py::get_project_scope": {
+   "web": 4
+  },
+  "app/api/deps.py::project_id": {
+   "web": 14
+  },
+  "app/api/middleware.py::<module>": {
+   "web": 1
+  },
+  "app/api/middleware.py::TraceIdMiddleware": {
+   "web": 1
+  },
+  "app/api/middleware.py::dispatch": {
+   "web": 111
+  },
+  "app/api/routes_auth_projects.py::<module>": {
+   "web": 1
+  },
+  "app/api/routes_auth_projects.py::_project_response": {
+   "web": 2
+  },
+  "app/api/routes_auth_projects.py::create_project": {
+   "web": 2
+  },
+  "app/api/routes_auth_projects.py::register": {
+   "web": 2
+  },
+  "app/api/routes_knowledge.py::<module>": {
+   "web": 1
+  },
+  "app/api/routes_runs.py::<module>": {
+   "web": 1
+  },
+  "app/api/routes_runs.py::_dispatch": {
+   "web": 2
+  },
+  "app/api/routes_runs.py::_epoch": {
+   "web": 2
+  },
+  "app/api/routes_runs.py::_insight_response": {
+   "web": 12
+  },
+  "app/api/routes_runs.py::_load_domain": {
+   "web": 2
+  },
+  "app/api/routes_runs.py::_uploads_dir": {
+   "web": 2
+  },
+  "app/api/routes_runs.py::create_analysis_run": {
+   "web": 2
+  },
+  "app/api/routes_runs.py::get_run": {
+   "web": 27
+  },
+  "app/api/routes_runs.py::get_run_detail": {
+   "web": 1
+  },
+  "app/api/routes_runs.py::list_run_insights": {
+   "web": 1
+  },
+  "app/api/routes_runs.py::upload_log": {
+   "web": 2
+  },
+  "app/api/schemas.py::<module>": {
+   "web": 1
+  },
+  "app/api/schemas.py::CreateDataSourceRequest": {
+   "web": 1
+  },
+  "app/api/schemas.py::CreateProjectRequest": {
+   "web": 1
+  },
+  "app/api/schemas.py::CreateRunRequest": {
+   "web": 1
+  },
+  "app/api/schemas.py::CreateRunResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::DataSourceResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::EditCandidateRequest": {
+   "web": 1
+  },
+  "app/api/schemas.py::EvidenceResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::InsightResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::KnowledgeActionResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::KnowledgeCandidateResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::LoginRequest": {
+   "web": 1
+  },
+  "app/api/schemas.py::ProjectResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::RegisterRequest": {
+   "web": 1
+  },
+  "app/api/schemas.py::RunFilters": {
+   "web": 1
+  },
+  "app/api/schemas.py::RunResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::StrictModel": {
+   "web": 1
+  },
+  "app/api/schemas.py::TimeRange": {
+   "web": 1
+  },
+  "app/api/schemas.py::TokenResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::UploadResponse": {
+   "web": 1
+  },
+  "app/api/schemas.py::_budget_granularity": {
+   "web": 2
+  },
+  "app/api/scoping.py::<module>": {
+   "web": 1
+  },
+  "app/api/scoping.py::InsightScope": {
+   "web": 1
+  },
+  "app/api/scoping.py::RunScope": {
+   "web": 1
+  },
+  "app/api/scoping.py::_owns_project": {
+   "web": 29
+  },
+  "app/api/scoping.py::assert_same_project": {
+   "web": 28
+  },
+  "app/api/scoping.py::get_run_scope": {
+   "web": 29
+  },
+  "app/api/scoping.py::run_id": {
+   "web": 2
+  },
+  "app/api/security.py::<module>": {
+   "web": 1
+  },
+  "app/api/security.py::AuthError": {
+   "web": 1
+  },
+  "app/api/security.py::InvalidCredentialsError": {
+   "web": 1
+  },
+  "app/api/security.py::TokenError": {
+   "web": 1
+  },
+  "app/api/security.py::_password_bytes": {
+   "web": 2
+  },
+  "app/api/security.py::bearer_token_from_header": {
+   "web": 35
+  },
+  "app/api/security.py::create_access_token": {
+   "web": 2
+  },
+  "app/api/security.py::decode_access_token": {
+   "web": 35
+  },
+  "app/api/security.py::hash_password": {
+   "web": 2
+  },
+  "app/celery_app.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/config.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/config.py::Settings": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/config.py::get_settings": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/db.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/db.py::Base": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/db.py::get_db": {
+   "web": 74
+  },
+  "app/domains/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/__init__.py::ComputerMonitoringDomain": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/__init__.py::__init__": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/__init__.py::_extract_metric_payload": {
+   "web": 2016
+  },
+  "app/domains/computer_monitoring/__init__.py::normalize": {
+   "web": 2016
+  },
+  "app/domains/computer_monitoring/__init__.py::parse_line": {
+   "web": 2016
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::Analyzer": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::CPUSpike": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::DiskFull": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::MemoryGrowth": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::ProcessCrash": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::__init__": {
+   "web": 4,
+   "worker": 4
+  },
+  "app/domains/computer_monitoring/config.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/knowledge/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/knowledge/_loader.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/knowledge/_loader.py::KnowledgeFormatError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/parser.py::<genexpr>": {
+   "web": 8064
+  },
+  "app/domains/computer_monitoring/parser.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/parser.py::canonical_metric_name": {
+   "web": 676
+  },
+  "app/domains/computer_monitoring/parser.py::extract_metrics": {
+   "web": 2016
+  },
+  "app/domains/computer_monitoring/parser.py::infer_severity": {
+   "web": 2016
+  },
+  "app/domains/computer_monitoring/parser.py::parse_line": {
+   "web": 2016
+  },
+  "app/domains/computer_monitoring/parser.py::parse_log4j_line": {
+   "web": 2016
+  },
+  "app/domains/computer_monitoring/parser.py::parse_syslog_line": {
+   "web": 2016
+  },
+  "app/domains/computer_monitoring/runbooks/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/runbooks/_loader.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/runbooks/_loader.py::RunbookFormatError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/protocol.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/protocol.py::AnalyzerFinding": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/protocol.py::DomainBase": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/protocol.py::KnowledgeEntry": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/protocol.py::KnowledgeNotConfirmableError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/protocol.py::MetricSpec": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/protocol.py::NormalizedEvent": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/protocol.py::Runbook": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/registry.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/registry.py::DomainNotFoundError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/registry.py::DomainRegistry": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/registry.py::DomainVersionMismatchError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/registry.py::__init__": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/registry.py::get_domain_registry": {
+   "web": 4,
+   "worker": 2
+  },
+  "app/domains/registry.py::load": {
+   "web": 4,
+   "worker": 2
+  },
+  "app/domains/registry.py::register": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/wiring.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/domains/wiring.py::build_default_registry": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::ConfigurationError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::GatewayError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::L0DoesNotCallModelError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::ModelGateway": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::ModelResult": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::ModelUnavailableError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::StructuredOutputError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::TierConfig": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/base.py::estimate_cost": {
+   "web": 2,
+   "worker": 1
+  },
+  "app/gateways/deepseek.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/deepseek.py::DeepSeekGateway": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/router.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/router.py::ResolvedModel": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/router.py::Router": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/gateways/router.py::_tier_field": {
+   "web": 28,
+   "worker": 58
+  },
+  "app/gateways/router.py::read_tier_configs": {
+   "web": 2,
+   "worker": 4
+  },
+  "app/main.py::<module>": {
+   "web": 1
+  },
+  "app/models/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/agent_run.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/agent_run.py::AgentRun": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/base.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/base.py::Base": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/base.py::utcnow": {
+   "web": 8,
+   "worker": 13
+  },
+  "app/models/datasource.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/datasource.py::DataSource": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/enums.py::<genexpr>": {
+   "web": 28,
+   "worker": 28
+  },
+  "app/models/enums.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/enums.py::agent_run_check_sql": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/enums.py::event_type_check_sql": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/enums.py::insight_type_check_sql": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/enums.py::severity_check_sql": {
+   "web": 3,
+   "worker": 3
+  },
+  "app/models/event.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/event.py::Event": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/event_group.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/event_group.py::EventGroup": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/evidence.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/evidence.py::Evidence": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/incident.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/incident.py::Incident": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/insight.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/insight.py::Insight": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/project.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/project.py::Project": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/user.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/models/user.py::User": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/parsers/__init__.py::<module>": {
+   "web": 1
+  },
+  "app/parsers/__init__.py::get_parser": {
+   "web": 2
+  },
+  "app/parsers/base.py::<module>": {
+   "web": 1
+  },
+  "app/parsers/base.py::BaseParser": {
+   "web": 1
+  },
+  "app/parsers/base.py::ParseStats": {
+   "web": 1
+  },
+  "app/parsers/base.py::ParsedRecord": {
+   "web": 1
+  },
+  "app/parsers/base.py::__init__": {
+   "web": 2
+  },
+  "app/parsers/base.py::as_dict": {
+   "web": 4
+  },
+  "app/parsers/base.py::reset": {
+   "web": 2
+  },
+  "app/parsers/jsonl.py::<module>": {
+   "web": 1
+  },
+  "app/parsers/jsonl.py::JsonlParser": {
+   "web": 1
+  },
+  "app/parsers/txt.py::<genexpr>": {
+   "web": 14112
+  },
+  "app/parsers/txt.py::<module>": {
+   "web": 1
+  },
+  "app/parsers/txt.py::TxtParser": {
+   "web": 1
+  },
+  "app/parsers/txt.py::__init__": {
+   "web": 2
+  },
+  "app/parsers/txt.py::_build_record": {
+   "web": 2016
+  },
+  "app/parsers/txt.py::flush": {
+   "web": 2018
+  },
+  "app/parsers/txt.py::is_blank_or_comment": {
+   "web": 2016
+  },
+  "app/parsers/txt.py::is_continuation": {
+   "web": 2016
+  },
+  "app/parsers/txt.py::parse": {
+   "web": 2
+  },
+  "app/policy/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/cost_controller.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/cost_controller.py::BudgetExceededError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/cost_controller.py::CostController": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/cost_controller.py::CostEstimate": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/cost_controller.py::PreCheckResult": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/cost_controller.py::RunUsage": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/cost_controller.py::StopExecution": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/cost_controller.py::__init__": {
+   "web": 2,
+   "worker": 2
+  },
+  "app/policy/cost_controller.py::estimate_run_cost": {
+   "web": 2
+  },
+  "app/policy/cost_controller.py::pre_check": {
+   "web": 2
+  },
+  "app/policy/policy.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/policy.py::PolicyError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/policy.py::PolicyOverrides": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/policy.py::RunPolicy": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/policy.py::__post_init__": {
+   "web": 2,
+   "worker": 2
+  },
+  "app/policy/policy.py::allows": {
+   "web": 2,
+   "worker": 2
+  },
+  "app/policy/store.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/store.py::ProjectPolicyStore": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/store.py::__init__": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/store.py::get_policy_store": {
+   "web": 2,
+   "worker": 2
+  },
+  "app/policy/store.py::policy_for": {
+   "web": 2,
+   "worker": 2
+  },
+  "app/policy/store.py::policy_from_settings": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/wiring.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/wiring.py::PolicyGuardedRouter": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/policy/wiring.py::_month_spent": {
+   "web": 2
+  },
+  "app/policy/wiring.py::build_cost_controller": {
+   "web": 2,
+   "worker": 2
+  },
+  "app/policy/wiring.py::month_start": {
+   "web": 2
+  },
+  "app/repositories/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/agent_run.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/agent_run.py::AgentRunRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/agent_run.py::cost_sum_since": {
+   "web": 2
+  },
+  "app/repositories/agent_run.py::create_queued": {
+   "web": 2
+  },
+  "app/repositories/agent_run.py::find_reusable": {
+   "web": 2
+  },
+  "app/repositories/base.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/base.py::ProjectScopedRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/base.py::__init__": {
+   "web": 10,
+   "worker": 5
+  },
+  "app/repositories/base.py::add": {
+   "web": 4,
+   "worker": 12
+  },
+  "app/repositories/base.py::get": {
+   "web": 2,
+   "worker": 15
+  },
+  "app/repositories/base.py::scoped": {
+   "web": 8,
+   "worker": 18
+  },
+  "app/repositories/datasource.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/datasource.py::DataSourceRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/datasource.py::find_one_by_format": {
+   "web": 2
+  },
+  "app/repositories/event.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/event.py::EventRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/event_group.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/event_group.py::EventGroupRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/evidence.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/evidence.py::EvidenceRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/evidence.py::__init__": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/evidence.py::_scoped": {
+   "web": 12
+  },
+  "app/repositories/evidence.py::list_for_insight": {
+   "web": 12
+  },
+  "app/repositories/incident.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/incident.py::IncidentRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/insight.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/insight.py::InsightRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/insight.py::list_for_run": {
+   "web": 2
+  },
+  "app/repositories/project.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/project.py::ProjectRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/project.py::__init__": {
+   "web": 35,
+   "worker": 1
+  },
+  "app/repositories/project.py::add": {
+   "web": 2
+  },
+  "app/repositories/project.py::get_for_user": {
+   "web": 33
+  },
+  "app/repositories/user.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/user.py::UserRepository": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/repositories/user.py::__init__": {
+   "web": 37
+  },
+  "app/repositories/user.py::add": {
+   "web": 2
+  },
+  "app/repositories/user.py::get": {
+   "web": 35
+  },
+  "app/repositories/user.py::get_by_email": {
+   "web": 2
+  },
+  "app/services/__init__.py::<module>": {
+   "web": 1
+  },
+  "app/services/upload_service.py::<module>": {
+   "web": 1
+  },
+  "app/services/upload_service.py::UnsupportedFormatError": {
+   "web": 1
+  },
+  "app/services/upload_service.py::UploadResult": {
+   "web": 1
+  },
+  "app/services/upload_service.py::UploadService": {
+   "web": 1
+  },
+  "app/services/upload_service.py::UploadTooLargeError": {
+   "web": 1
+  },
+  "app/services/upload_service.py::__init__": {
+   "web": 2
+  },
+  "app/services/upload_service.py::_decode": {
+   "web": 2
+  },
+  "app/services/upload_service.py::_enforce_size_limit": {
+   "web": 2
+  },
+  "app/services/upload_service.py::_json_safe_meta": {
+   "web": 2016
+  },
+  "app/services/upload_service.py::_persist": {
+   "web": 2
+  },
+  "app/services/upload_service.py::_resolve_data_source": {
+   "web": 2
+  },
+  "app/services/upload_service.py::_store_masked": {
+   "web": 2
+  },
+  "app/services/upload_service.py::as_dict": {
+   "web": 2
+  },
+  "app/services/upload_service.py::ingest": {
+   "web": 2
+  },
+  "app/services/upload_service.py::mask_options_from_datasource": {
+   "web": 2
+  },
+  "app/tasks/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tasks/analysis.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tools/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tools/data_ops.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tools/registry.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tools/registry.py::ToolExecutionError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tools/registry.py::ToolInputError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tools/registry.py::ToolNotFoundError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tools/registry.py::ToolRegistry": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tools/registry.py::ToolResult": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/tools/registry.py::ToolSpec": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/utils/__init__.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/utils/masking.py::<genexpr>": {
+   "web": 18
+  },
+  "app/utils/masking.py::<module>": {
+   "web": 1
+  },
+  "app/utils/masking.py::MaskRule": {
+   "web": 1
+  },
+  "app/utils/masking.py::MaskStats": {
+   "web": 1
+  },
+  "app/utils/masking.py::Masker": {
+   "web": 1
+  },
+  "app/utils/masking.py::__init__": {
+   "web": 2
+  },
+  "app/utils/masking.py::_apply": {
+   "web": 22
+  },
+  "app/utils/masking.py::as_dict": {
+   "web": 2
+  },
+  "app/utils/masking.py::build_rules": {
+   "web": 2
+  },
+  "app/utils/masking.py::hash_token": {
+   "web": 14
+  },
+  "app/utils/masking.py::luhn_ok": {
+   "web": 18
+  },
+  "app/utils/masking.py::mask": {
+   "web": 2
+  },
+  "app/utils/masking.py::normalize_email": {
+   "web": 12
+  },
+  "app/utils/masking.py::record": {
+   "web": 14
+  },
+  "app/utils/masking.py::replace": {
+   "web": 31
+  },
+  "app/utils/masking.py::replace_generic": {
+   "web": 1
+  },
+  "app/utils/masking.py::token_for": {
+   "web": 14
+  },
+  "app/utils/observability.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/utils/observability.py::__enter__": {
+   "web": 37,
+   "worker": 2
+  },
+  "app/utils/observability.py::__exit__": {
+   "web": 37,
+   "worker": 1
+  },
+  "app/utils/observability.py::__init__": {
+   "web": 37,
+   "worker": 2
+  },
+  "app/utils/observability.py::_add_context": {
+   "web": 2,
+   "worker": 6
+  },
+  "app/utils/observability.py::bind_run_context": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/utils/observability.py::configure_logging": {
+   "web": 2,
+   "worker": 2
+  },
+  "app/utils/observability.py::current_project_id": {
+   "web": 2,
+   "worker": 6
+  },
+  "app/utils/observability.py::current_run_id": {
+   "web": 2,
+   "worker": 6
+  },
+  "app/utils/observability.py::current_trace_id": {
+   "web": 6,
+   "worker": 6
+  },
+  "app/utils/observability.py::get_logger": {
+   "web": 3,
+   "worker": 2
+  },
+  "app/utils/observability.py::new_trace_id": {
+   "web": 37
+  },
+  "app/utils/timestamps.py::<module>": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/utils/timestamps.py::TimestampUnparseableError": {
+   "web": 1,
+   "worker": 1
+  },
+  "app/utils/timestamps.py::get_zone": {
+   "web": 2018,
+   "worker": 1
+  },
+  "app/utils/timestamps.py::parse_timestamp": {
+   "web": 2016
+  },
+  "app/utils/timestamps.py::to_utc": {
+   "web": 2016,
+   "worker": 1
+  },
+  "app/web/__init__.py::<module>": {
+   "web": 1
+  },
+  "app/web/__init__.py::get_templates": {
+   "web": 1
+  },
+  "app/web/__init__.py::mount_static": {
+   "web": 1
+  },
+  "app/web/views.py::<module>": {
+   "web": 1
+  },
+  "app/analysis/complexity.py::<genexpr>": {
+   "worker": 2018
+  },
+  "app/analysis/complexity.py::_l3": {
+   "worker": 2
+  },
+  "app/analysis/complexity.py::assess_complexity": {
+   "worker": 2
+  },
+  "app/analysis/complexity.py::count_time_clusters": {
+   "worker": 2
+  },
+  "app/analysis/context.py::<genexpr>": {
+   "worker": 98
+  },
+  "app/analysis/context.py::_compress_to_total_budget": {
+   "worker": 2
+  },
+  "app/analysis/context.py::_render_anomalies": {
+   "worker": 2
+  },
+  "app/analysis/context.py::_render_incidents": {
+   "worker": 2
+  },
+  "app/analysis/context.py::_render_samples": {
+   "worker": 2
+  },
+  "app/analysis/context.py::_truncate_lines": {
+   "worker": 3
+  },
+  "app/analysis/context.py::assemble": {
+   "worker": 2
+  },
+  "app/analysis/context.py::build_distilled_context": {
+   "worker": 2
+  },
+  "app/analysis/context.py::estimate_tokens": {
+   "worker": 966
+  },
+  "app/analysis/context.py::out_of_rounds": {
+   "worker": 5
+  },
+  "app/analysis/context.py::render": {
+   "worker": 2
+  },
+  "app/analysis/context.py::tokens": {
+   "worker": 98
+  },
+  "app/analysis/context.py::total_tokens": {
+   "worker": 14
+  },
+  "app/analysis/evidence.py::_optional_text": {
+   "worker": 24
+  },
+  "app/analysis/evidence.py::classify_evidence": {
+   "worker": 12
+  },
+  "app/analysis/evidence.py::needs_retry": {
+   "worker": 1
+  },
+  "app/analysis/evidence.py::normalize_evidence_ids": {
+   "worker": 16
+  },
+  "app/analysis/evidence.py::validate_insight": {
+   "worker": 12
+  },
+  "app/analysis/evidence.py::validate_insights": {
+   "worker": 1
+  },
+  "app/analysis/grouping.py::<genexpr>": {
+   "worker": 7374
+  },
+  "app/analysis/grouping.py::<lambda>": {
+   "worker": 3728
+  },
+  "app/analysis/grouping.py::_same_severity_tier": {
+   "worker": 1860
+  },
+  "app/analysis/grouping.py::_window_start": {
+   "worker": 2016
+  },
+  "app/analysis/grouping.py::_windows_overlap_or_close": {
+   "worker": 1860
+  },
+  "app/analysis/grouping.py::cluster_events": {
+   "worker": 2
+  },
+  "app/analysis/grouping.py::event_count": {
+   "worker": 1864
+  },
+  "app/analysis/grouping.py::flush": {
+   "worker": 594
+  },
+  "app/analysis/grouping.py::group_key_for": {
+   "worker": 2016
+  },
+  "app/analysis/grouping.py::make_template": {
+   "worker": 2016
+  },
+  "app/analysis/grouping.py::merge_into_incidents": {
+   "worker": 2
+  },
+  "app/analysis/heartbeat.py::check_cancelled": {
+   "worker": 5
+  },
+  "app/analysis/heartbeat.py::should_abort": {
+   "worker": 5
+  },
+  "app/analysis/heartbeat.py::validate_heartbeat_timeout": {
+   "worker": 2
+  },
+  "app/analysis/persistence.py::as_dict": {
+   "worker": 1
+  },
+  "app/analysis/persistence.py::persist_insights": {
+   "worker": 1
+  },
+  "app/analysis/pipeline.py::<genexpr>": {
+   "worker": 1924
+  },
+  "app/analysis/pipeline.py::<lambda>": {
+   "worker": 2016
+  },
+  "app/analysis/pipeline.py::_build_prompt": {
+   "worker": 2
+  },
+  "app/analysis/pipeline.py::_group_severity": {
+   "worker": 1864
+  },
+  "app/analysis/pipeline.py::_incidents_for_context": {
+   "worker": 2
+  },
+  "app/analysis/pipeline.py::_maybe_escalate_to_l3": {
+   "worker": 1
+  },
+  "app/analysis/pipeline.py::_run_model_analysis": {
+   "worker": 2
+  },
+  "app/analysis/pipeline.py::_select_samples": {
+   "worker": 2
+  },
+  "app/analysis/pipeline.py::_validate_candidates": {
+   "worker": 1
+  },
+  "app/analysis/pipeline.py::analyze": {
+   "worker": 2
+  },
+  "app/analysis/pipeline.py::attach_runbooks": {
+   "worker": 2
+  },
+  "app/analysis/pipeline.py::attach_runbooks_to_insights": {
+   "worker": 1
+  },
+  "app/analysis/pipeline.py::build_valid_event_ids": {
+   "worker": 2
+  },
+  "app/analysis/pipeline.py::compute_statistics": {
+   "worker": 2
+  },
+  "app/analysis/pipeline.py::run_detection": {
+   "worker": 2
+  },
+  "app/analysis/pipeline.py::runbook_by_analyzer": {
+   "worker": 1
+  },
+  "app/analysis/pipeline.py::used_rules_only": {
+   "worker": 1
+  },
+  "app/analysis/retry.py::<lambda>": {
+   "worker": 2
+  },
+  "app/analysis/retry.py::__post_init__": {
+   "worker": 2
+  },
+  "app/analysis/retry.py::as_dict": {
+   "worker": 3
+  },
+  "app/analysis/retry.py::call_with_fallback": {
+   "worker": 2
+  },
+  "app/analysis/retry.py::call_with_retry": {
+   "worker": 2
+  },
+  "app/analysis/retry.py::downgrade_ladder": {
+   "worker": 2
+  },
+  "app/analysis/runner.py::<lambda>": {
+   "worker": 7
+  },
+  "app/analysis/runner.py::__init__": {
+   "worker": 2
+  },
+  "app/analysis/runner.py::_metadata": {
+   "worker": 1
+  },
+  "app/analysis/runner.py::check_cancel": {
+   "worker": 5
+  },
+  "app/analysis/runner.py::execute": {
+   "worker": 2
+  },
+  "app/analysis/runner.py::heartbeat": {
+   "worker": 5
+  },
+  "app/analysis/state_machine.py::__init__": {
+   "worker": 5
+  },
+  "app/analysis/state_machine.py::_append_phase": {
+   "worker": 3
+  },
+  "app/analysis/state_machine.py::assert_known_status": {
+   "worker": 11
+  },
+  "app/analysis/state_machine.py::can_transition": {
+   "worker": 3
+  },
+  "app/analysis/state_machine.py::completed_phases": {
+   "worker": 1
+  },
+  "app/analysis/state_machine.py::skipped_phases": {
+   "worker": 1
+  },
+  "app/analysis/state_machine.py::status": {
+   "worker": 3
+  },
+  "app/analysis/state_machine.py::transition": {
+   "worker": 3
+  },
+  "app/celery_app.py::_configure_worker_logging": {
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/__init__.py::analyzers": {
+   "worker": 2
+  },
+  "app/domains/computer_monitoring/__init__.py::find_runbook_for": {
+   "worker": 29
+  },
+  "app/domains/computer_monitoring/__init__.py::runbooks": {
+   "worker": 29
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::<genexpr>": {
+   "worker": 2045
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::_metric_samples": {
+   "worker": 6
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::_values": {
+   "worker": 6
+  },
+  "app/domains/computer_monitoring/analyzers/__init__.py::analyze": {
+   "worker": 8
+  },
+  "app/domains/computer_monitoring/runbooks/_loader.py::<lambda>": {
+   "worker": 5
+  },
+  "app/domains/computer_monitoring/runbooks/_loader.py::load_runbooks": {
+   "worker": 1
+  },
+  "app/domains/computer_monitoring/runbooks/_loader.py::parse_runbook": {
+   "worker": 5
+  },
+  "app/gateways/base.py::as_model_call": {
+   "worker": 1
+  },
+  "app/gateways/credentials.py::<module>": {
+   "worker": 1
+  },
+  "app/gateways/credentials.py::resolve_api_key": {
+   "worker": 2
+  },
+  "app/gateways/deepseek.py::__init__": {
+   "worker": 2
+  },
+  "app/gateways/deepseek.py::_make_client": {
+   "worker": 2
+  },
+  "app/gateways/deepseek.py::_post": {
+   "worker": 2
+  },
+  "app/gateways/deepseek.py::_reasoning_fields": {
+   "worker": 2
+  },
+  "app/gateways/deepseek.py::_slice_braces": {
+   "worker": 1
+  },
+  "app/gateways/deepseek.py::_strip_fence": {
+   "worker": 1
+  },
+  "app/gateways/deepseek.py::_to_result": {
+   "worker": 1
+  },
+  "app/gateways/deepseek.py::build_structured_prompt": {
+   "worker": 2
+  },
+  "app/gateways/deepseek.py::generate": {
+   "worker": 2
+  },
+  "app/gateways/deepseek.py::parse_json_content": {
+   "worker": 1
+  },
+  "app/gateways/router.py::__init__": {
+   "worker": 2
+  },
+  "app/gateways/router.py::_is_peak_now": {
+   "worker": 1
+  },
+  "app/gateways/router.py::_record": {
+   "worker": 1
+  },
+  "app/gateways/router.py::build_router": {
+   "worker": 2
+  },
+  "app/gateways/router.py::generate": {
+   "worker": 2
+  },
+  "app/gateways/router.py::resolve": {
+   "worker": 2
+  },
+  "app/policy/cost_controller.py::_sync_elapsed": {
+   "worker": 2
+  },
+  "app/policy/cost_controller.py::elapsed_seconds": {
+   "worker": 2
+  },
+  "app/policy/cost_controller.py::mid_check": {
+   "worker": 2
+  },
+  "app/policy/cost_controller.py::record_call": {
+   "worker": 2
+  },
+  "app/policy/cost_controller.py::start": {
+   "worker": 2
+  },
+  "app/policy/cost_controller.py::tokens_total": {
+   "worker": 2
+  },
+  "app/policy/wiring.py::__init__": {
+   "worker": 2
+  },
+  "app/policy/wiring.py::generate": {
+   "worker": 2
+  },
+  "app/repositories/agent_run.py::append_model_call": {
+   "worker": 1
+  },
+  "app/repositories/agent_run.py::apply_status": {
+   "worker": 3
+  },
+  "app/repositories/agent_run.py::is_cancel_requested": {
+   "worker": 5
+  },
+  "app/repositories/agent_run.py::touch_heartbeat": {
+   "worker": 5
+  },
+  "app/repositories/event.py::pipeline_events": {
+   "worker": 2
+  },
+  "app/repositories/evidence.py::add": {
+   "worker": 12
+  },
+  "app/repositories/project.py::add_budget_used": {
+   "worker": 1
+  },
+  "app/tasks/analysis.py::<genexpr>": {
+   "worker": 6
+  },
+  "app/tasks/analysis.py::_attempt_tier_inner": {
+   "worker": 2
+  },
+  "app/tasks/analysis.py::_execute": {
+   "worker": 2
+  },
+  "app/tasks/analysis.py::_persist_result": {
+   "worker": 1
+  },
+  "app/tasks/analysis.py::_settings": {
+   "worker": 2
+  },
+  "app/tasks/analysis.py::_utcnow": {
+   "worker": 4
+  },
+  "app/tasks/analysis.py::attempt_tier": {
+   "worker": 2
+  },
+  "app/tasks/analysis.py::execute_run_task": {
+   "worker": 2
+  },
+  "app/tasks/health.py::<module>": {
+   "worker": 1
+  },
+  "app/tools/data_ops.py::<genexpr>": {
+   "worker": 20772
+  },
+  "app/tools/data_ops.py::_is_error": {
+   "worker": 2016
+  },
+  "app/tools/data_ops.py::_iter_events": {
+   "worker": 2
+  },
+  "app/tools/data_ops.py::_maybe_ts": {
+   "worker": 2016
+  },
+  "app/tools/data_ops.py::stats_calculator": {
+   "worker": 2
+  },
+  "app/utils/timestamps.py::<genexpr>": {
+   "worker": 3
+  },
+  "app/utils/timestamps.py::is_peak_time": {
+   "worker": 1
+  }
+ },
+ "uploads_only": {
+  "project_id": 6945,
+  "jsonl": {
+   "status_code": 200,
+   "file": "logs/nginx_json_access.log",
+   "events_persisted": 1000,
+   "parse": {
+    "parser": "jsonl",
+    "total_lines": 1000,
+    "parsed": 1000,
+    "bad_lines": 0,
+    "skipped": 0,
+    "merged": 0,
+    "bad_line_rate": 0.0,
+    "bad_line_samples": [],
+    "invalid_json": 0,
+    "missing_timestamp": 0
+   },
+   "mask": {
+    "total": 0,
+    "by_rule": {}
+   },
+   "created_data_source": true,
+   "data_source_id": 4931
+  },
+  "negative_sample": {
+   "status_code": 200,
+   "file": "logs/nginx_plain.log",
+   "events_persisted": 0,
+   "parse": {
+    "parser": "txt",
+    "total_lines": 1000,
+    "parsed": 0,
+    "bad_lines": 1000,
+    "skipped": 0,
+    "merged": 0,
+    "bad_line_rate": 1.0,
+    "bad_line_samples": [
+     "93.180.71.3 - - [17/May/2015:08:05:32 +0000] \"GET /downloads/product_1 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.21)\"",
+     "93.180.71.3 - - [17/May/2015:08:05:23 +0000] \"GET /downloads/product_1 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.21)\"",
+     "80.91.33.133 - - [17/May/2015:08:05:24 +0000] \"GET /downloads/product_1 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.17)\"",
+     "217.168.17.5 - - [17/May/2015:08:05:34 +0000] \"GET /downloads/product_1 HTTP/1.1\" 200 490 \"-\" \"Debian APT-HTTP/1.3 (0.8.10.3)\"",
+     "217.168.17.5 - - [17/May/2015:08:05:09 +0000] \"GET /downloads/product_2 HTTP/1.1\" 200 490 \"-\" \"Debian APT-HTTP/1.3 (0.8.10.3)\"",
+     "93.180.71.3 - - [17/May/2015:08:05:57 +0000] \"GET /downloads/product_1 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.21)\"",
+     "217.168.17.5 - - [17/May/2015:08:05:02 +0000] \"GET /downloads/product_2 HTTP/1.1\" 404 337 \"-\" \"Debian APT-HTTP/1.3 (0.8.10.3)\"",
+     "217.168.17.5 - - [17/May/2015:08:05:42 +0000] \"GET /downloads/product_1 HTTP/1.1\" 404 332 \"-\" \"Debian APT-HTTP/1.3 (0.8.10.3)\"",
+     "80.91.33.133 - - [17/May/2015:08:05:01 +0000] \"GET /downloads/product_1 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.17)\"",
+     "93.180.71.3 - - [17/May/2015:08:05:27 +0000] \"GET /downloads/product_1 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.21)\"",
+     "217.168.17.5 - - [17/May/2015:08:05:12 +0000] \"GET /downloads/product_2 HTTP/1.1\" 200 3316 \"-\" \"-\"",
+     "188.138.60.101 - - [17/May/2015:08:05:49 +0000] \"GET /downloads/product_2 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.9.7.9)\"",
+     "80.91.33.133 - - [17/May/2015:08:05:14 +0000] \"GET /downloads/product_1 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.16)\"",
+     "46.4.66.76 - - [17/May/2015:08:05:45 +0000] \"GET /downloads/product_1 HTTP/1.1\" 404 318 \"-\" \"Debian APT-HTTP/1.3 (1.0.1ubuntu2)\"",
+     "93.180.71.3 - - [17/May/2015:08:05:26 +0000] \"GET /downloads/product_1 HTTP/1.1\" 404 324 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.21)\"",
+     "91.234.194.89 - - [17/May/2015:08:05:22 +0000] \"GET /downloads/product_2 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.9.7.9)\"",
+     "80.91.33.133 - - [17/May/2015:08:05:07 +0000] \"GET /downloads/product_1 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.17)\"",
+     "37.26.93.214 - - [17/May/2015:08:05:38 +0000] \"GET /downloads/product_2 HTTP/1.1\" 404 319 \"-\" \"Go 1.1 package http\"",
+     "188.138.60.101 - - [17/May/2015:08:05:25 +0000] \"GET /downloads/product_2 HTTP/1.1\" 304 0 \"-\" \"Debian APT-HTTP/1.3 (0.9.7.9)\"",
+     "93.180.71.3 - - [17/May/2015:08:05:11 +0000] \"GET /downloads/product_1 HTTP/1.1\" 404 340 \"-\" \"Debian APT-HTTP/1.3 (0.8.16~exp12ubuntu10.21)\""
+    ]
+   },
+   "mask": {
+    "total": 0,
+    "by_rule": {}
+   },
+   "created_data_source": true,
+   "data_source_id": 4932
+  },
+  "metric_events": {
+   "status_code": 200,
+   "file": "tests/datasets/cpu_anomaly/metrics.log",
+   "events_persisted": 10,
+   "parse": {
+    "parser": "txt",
+    "total_lines": 10,
+    "parsed": 10,
+    "bad_lines": 0,
+    "skipped": 0,
+    "merged": 0,
+    "bad_line_rate": 0.0,
+    "bad_line_samples": []
+   },
+   "mask": {
+    "total": 0,
+    "by_rule": {}
+   },
+   "created_data_source": false,
+   "data_source_id": 4932
+  },
+  "malformed": {
+   "status_code": 200,
+   "file": "tests/datasets/malformed/mixed.log",
+   "events_persisted": 5,
+   "parse": {
+    "parser": "txt",
+    "total_lines": 10,
+    "parsed": 5,
+    "bad_lines": 3,
+    "skipped": 1,
+    "merged": 1,
+    "bad_line_rate": 0.375,
+    "bad_line_samples": [
+     "{\"broken\": json, without closing brace\n......... .. ... ",
+     "Sep 99 99:99:99 host proc[1]: impossible timestamp",
+     "random binary-ish \u0001\u0002 garbage"
+    ]
+   },
+   "mask": {
+    "total": 0,
+    "by_rule": {}
+   },
+   "created_data_source": false,
+   "data_source_id": 4932
+  },
+  "reuse_second_upload": {
+   "created_data_source": false,
+   "data_source_id": 4932
+  },
+  "oversize": {
+   "status_code": 413,
+   "size_bytes": 11600000,
+   "detail": "上传大小 11600000 字节超过上限 10485760 字节（10 MiB）；请拆分后再上传"
+  },
+  "db": {
+   "events": 3015,
+   "metric_events": 10,
+   "data_sources": 2
+  },
+  "stored_files": {
+   "dir": "data/uploads/6945",
+   "files": [
+    "20260924114538992589_nginx_json_access.log",
+    "20260924114541103247_nginx_plain.log",
+    "20260924114543199605_metrics.log",
+    "20260924114543274446_mixed.log",
+    "20260924114543418548_Mac_2k.log"
+   ],
+   "canary_email_on_disk": false,
+   "canary_secret_on_disk": false,
+   "email_markers": 0,
+   "secret_markers": 0,
+   "lines": 1000
+  }
+ },
+ "api_contract": {
+  "healthz": {
+   "status_code": 200,
+   "body": {
+    "status": "ok",
+    "environment": "dev"
+   }
+  },
+  "healthz_deps": {
+   "status_code": 200,
+   "body": {
+    "status": "ok",
+    "checks": {
+     "postgres": {
+      "ok": true,
+      "server_version": "15.19"
+     },
+     "redis": {
+      "ok": true,
+      "version": "7.4.11"
+     }
+    }
+   }
+  },
+  "docs_status": 200,
+  "projects_without_token": 401,
+  "invalid_project_body": {
+   "status_code": 422,
+   "detail": "[{'type': 'missing', 'loc': ['body', 'name'], 'msg': 'Field required', 'input': {'budget_total': 1}}]"
+  },
+  "cross_project_data_sources": 404,
+  "pages": {
+   "/login": {
+    "status": 200,
+    "html": true
+   },
+   "/projects": {
+    "status": 200,
+    "html": true
+   },
+   "/knowledge/7137": {
+    "status": 200,
+    "html": true
+   }
+  },
+  "cancel_http": 200,
+  "cancelled_status": "queued",
+  "status_after_poll": "completed",
+  "cancel_effective": false,
+  "retry": {
+   "status_code": 422,
+   "body": {
+    "detail": "Run 3115 当前状态 completed 不允许重新分析；只有 ['failed', 'partial_success', 'timeout'] 可以"
+   }
+  },
+  "report_page": {
+   "status": 200,
+   "html": true
+  },
+  "idempotent": {
+   "first_run_id": 3116,
+   "second_run_id": 3116,
+   "same_run_id": true,
+   "reused": true,
+   "second_status": 202
+  }
+ },
+ "cancel_test": {
+  "run_id": 3028,
+  "project_id": 6949,
+  "cancel_http": 200,
+  "statuses_seen": [
+   "queued",
+   "completed"
+  ],
+  "final_status": "completed",
+  "cancel_requested_in_db": true,
+  "cost_actual": 0.032416,
+  "cancel_effective": false,
+  "note": "cancel_requested 已落库却仍跑到终态 → 取消在真机上没有生效"
+ },
+ "zombie_test": {
+  "run_id": 3029,
+  "project_id": 6950,
+  "status": "queued",
+  "heartbeat_age_seconds": null,
+  "checked_at": "2026-09-24 12:03:47.143184+00:00",
+  "error": null,
+  "note": "Worker 被杀后 Run 停在 queued（running 那次写入随事务一起丢了）；真机上没有任何东西回收它 —— beat 容器空转（celery_app 里没有 beat_schedule），且 find_zombie_runs 只认 running（停在 queued 的连扫描条件都不满足）。"
+ },
+ "budget_gate": {
+  "monthly_budget_setting": 10.0,
+  "run_max_cost_setting": 0.3,
+  "peak_multiplier_setting": 2.0,
+  "timezone": "Asia/Shanghai",
+  "tiny_project_budget": {
+   "http": 402,
+   "detail": "项目剩余预算 ¥0.0010 不足以覆盖预计成本 ¥0.0176"
+  },
+  "below_precision": {
+   "http": 422,
+   "detail": "[{'type': 'value_error', 'loc': ['body', 'budget_total'], 'msg': 'Value error, budget_total=1e-05 太小：金额精度是 4 位小数（最小 0.00"
+  },
+  "no_project_budget": {
+   "http": 202,
+   "status_field": "queued"
+  },
+  "month_spent_full": {
+   "http": 402,
+   "detail": "本月已花 ¥9.9990，月度预算 ¥10.0000 剩余 ¥0.0010 不足以覆盖预计成本 ¥0.0088",
+   "seeded_run_id": 3111,
+   "seeded_cost": 9.999,
+   "month_start": "2026-08-31 16:00:00+00:00"
+  },
+  "last_month_spent_full": {
+   "http": 202,
+   "status_field": "queued",
+   "detail": "None",
+   "seeded_run_id": 3112,
+   "seeded_cost": 30.0
+  },
+  "started_at_coverage": {
+   "runs_total": 177,
+   "runs_with_started_at": 2,
+   "runs_with_cost": 91
+  },
+  "peak_valley": {
+   "now_is_peak": false,
+   "peak_window_probe_0200utc": true,
+   "pre_check_estimate_L3": 0.0176,
+   "billed_formula_L3_peak_now": 0.016,
+   "billed_formula_L3_peak_forced": 0.032,
+   "peak_multiplier": 2.0,
+   "estimate_ignores_peak": true
+  }
+ },
+ "pytest": {
+  "tests": 725,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 3
+ },
+ "secret_scan": {
+  "hits": 0,
+  "where": []
+ },
+ "e2e": {
+  "passed": 16,
+  "total": 16,
+  "exit_code": 0
+ },
+ "golden": {
+  "passed": 18,
+  "failed": 0,
+  "total": 18,
+  "cost": 0.0
+ },
+ "runbook_probe": {
+  "project_id": 6944,
+  "events": 16,
+  "anomalies": 1,
+  "attached": 0,
+  "sample": {
+   "type": "ProcessCrash",
+   "pattern": "crash",
+   "message": "进程异常迹象（进程名命中 “crash”）：Internal name did not resolve to internal address!",
+   "runbook": null
+  },
+  "runbooks": {
+   "rb_cpu_001": {
+    "analyzer": "CPUSpike",
+    "metric_name": "cpu_used",
+    "condition": "value > 90"
+   },
+   "rb_crash_001": {
+    "analyzer": "ProcessCrash",
+    "message_pattern": "segfault|segmentation fault|core dumped|panic"
+   },
+   "rb_disk_001": {
+    "analyzer": "DiskFull",
+    "metric_name": "disk_used",
+    "condition": "value > 95"
+   },
+   "rb_memgrowth_001": {
+    "analyzer": "MemoryGrowth",
+    "metric_name": "memory_used",
+    "condition": "value > 90"
+   },
+   "rb_oom_001": {
+    "analyzer": "ProcessCrash",
+    "message_pattern": "Out of memory|oom-killer|Killed process"
+   }
+  }
+ }
+}

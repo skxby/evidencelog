@@ -207,27 +207,43 @@ RUN_LIVE_MODEL_TESTS=1 pytest tests/integration/test_gateway_live.py -v -s
 
 ### 评测与验收脚本（`.dsh/`）
 
-四个脚本都是**确定性、可复现**的；前两个不调模型，因此零成本。
+下面这些脚本里，**只有两处会产生模型费用**：`golden_eval.py` 加 `RUN_GOLDEN_LIVE=1`、
+以及 `real_path_evidence.py` 的默认模式；其余都是确定性、可复现、零成本的。
 
 | 脚本 | 作用 | 命令 |
 |---|---|---|
 | `.dsh/parser_eval.py` | 用 `logs/` 下 8 份真实日志量化可解析率与脱敏误伤率 | `python .dsh/parser_eval.py` |
 | `.dsh/golden_eval.py` | 跑 Golden Set 五个场景并打印逐条断言与成本 | `python .dsh/golden_eval.py`（加 `RUN_GOLDEN_LIVE=1` 走真模型，**付费**） |
 | `.dsh/stage_verify.py` | 按「阶段 → 承载验收的测试文件」出可核对的计数表 | `python .dsh/stage_verify.py` |
+| `.dsh/stage_acceptance.py` | **出「真机口径」阶段验收表**：每条验收 = 测试证据 + 真机接线 + 真机实测 | `python .dsh/stage_acceptance.py` |
+| `.dsh/wiring_graph.py` | 从真实入口点做调用图可达性；`--gaps` 穷举"写好了但没接上"的符号（含方法级） | `python .dsh/wiring_graph.py --gaps` |
+| `.dsh/live_path_trace.py` | 给 Web / Worker 装函数级 tracer，记录一次真实分析**实际执行了哪些函数** | `python .dsh/live_path_trace.py web 8001` / `... worker` |
+| `.dsh/real_path_evidence.py` | 真机运行时证据采集（落库、落盘、契约、上传、取消、僵尸、E2E+Golden 汇总） | `python .dsh/real_path_evidence.py [--contract\|--uploads\|--cancel-test\|--zombie-start\|--sweep]` |
+| `.dsh/budget_gate_check.py` | 真机核验成本闸门：项目预算 / 金额精度 / 未设上限 / **月度预算跨月** / **峰谷价口径** | `python .dsh/budget_gate_check.py` |
 | `.dsh/final_verify.cjs` | 对着**真跑起来的全栈**做 16 项端到端检查（真实 HTTP） | `node .dsh/final_verify.cjs` |
-| `.dsh/budget_gate_check.py` | 对着真栈核验成本闸门（预算不足拒绝创建 / 金额精度 / 未设预算放行） | `python .dsh/budget_gate_check.py` |
-| `.dsh/dead_wiring_audit.py` | 扫出"写好了但没接上"的符号（本轮多起故障都是这一形态） | `python .dsh/dead_wiring_audit.py` |
+| `.dsh/dead_wiring_audit.py` | 扫"顶层符号没人用 / 只有 tests 在用"（方法级缺口看 `wiring_graph.py --gaps`） | `python .dsh/dead_wiring_audit.py` |
+| `.dsh/settings_usage_audit.py` | 逐个确认 `.env`/Settings 里的配置项**真的被读过** | `python .dsh/settings_usage_audit.py` |
+| `.dsh/runbook_probe.py` | 重放真机事件，看 runbook 为什么没挂上 | `python .dsh/runbook_probe.py <project_id>` |
+| `.dsh/cancel_stale_probe.py` | 复现"取消慢一步"的机制（Worker 长事务的行锁） | `python .dsh/cancel_stale_probe.py <run_id>` |
 | `tests/unit/test_web_ui_contract.py` | 核对「页面 JS 调用的接口」与真实路由逐条对齐（阶段 11「全程不碰命令行」的机器化检查） | `pytest tests/unit/test_web_ui_contract.py -q` |
 
-最近一次实测（2026-09-24）：
+最近一次实测（2026-09-24，真机口径见《[阶段验收表-真机口径.md](阶段验收表-真机口径.md)》）：
 
 ```text
 解析率   域内 5 份系统日志 10000/10000 = 100%；含负样本 nginx_plain 11500/12500 = 92.00%
 脱敏     替换 12268 次；11575 个排障字段（uid=/pid=/HTTP 状态码/请求路径/容器 ID）零误伤
-Golden   离线 18/18 断言 ¥0；真模型 18/18 断言 ¥0.025524，0 条无证据的 fact
-E2E      16/16；真实调用 1607/3100 tokens、¥0.0140、8 条结论
-全量     pytest 693 passed / 3 skipped（跳过的是需 RUN_LIVE_MODEL_TESTS=1 的付费用例）
+Golden   离线 18/18 断言 ¥0
+E2E      容器全栈 16/16；真实调用 1607/3058 tokens、¥0.0138、7 条结论
+真机分析 真实语料 Mac_2k 2000 事件 → 12 结论 12 证据、L2→L3、¥0.0237
+全量     pytest 725 passed / 3 skipped（跳过的是需 RUN_LIVE_MODEL_TESTS=1 的付费用例）
+验收     58 条验收：39 达标 / 8 待实测 / 11 真机未达标
 ```
+
+> ⚠️ **11 条真机未达标**（测试全绿但真实路径上没生效）逐条列在
+> 《[真机核验报告-2026-09-24.md](真机核验报告-2026-09-24.md)》里，
+> 含根因与最小修复。最影响使用的是：月度预算取数（`started_at` 从不写入）、
+> 取消不生效（Worker 长事务持锁）、僵尸 Run 无人回收（beat 无 schedule）、
+> 分组/事故不落库、runbook 从不挂上、工具注册表没接进管线。
 
 > `logs/` 是外部公开真实日志语料（出处见 `logs/README.md`），已在版本库内，
 > 故**全新 clone 也跑得了这些基线**（`.gitattributes` 对 `logs/*.log` 关掉了

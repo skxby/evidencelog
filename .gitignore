@@ -36,6 +36,10 @@ migrations/__pycache__/
 .dsh/*.xml
 .dsh/*.txt
 .dsh/golden-uploads/
+# 函数级追踪原始数据（摘要已并入 runtime_evidence.json，原始文件太大且可重跑）
+.dsh/trace_*.json
+# 僵尸实验的临时记录：里面有本次会话的 JWT，绝不进版本库
+.dsh/zombie_test.json
 
 # --- 运行时数据 ---
 # uploads/ 存的是脱敏后的日志，属运行数据，不进版本库
