@@ -552,9 +552,11 @@ def zombie_check() -> None:
         "checked_at": str(now),
         "error": row["error"],
         "note": (
-            f"Worker 被杀后 Run 停在 {row['status']}（running 那次写入随事务一起丢了）；"
-            "真机上没有任何东西回收它 —— beat 容器空转（celery_app 里没有 beat_schedule），"
-            "且 find_zombie_runs 只认 running（停在 queued 的连扫描条件都不满足）。"
+            "已由维护队列回收为 timeout（心跳丢失）—— 回收者住在 beat 容器的 "
+            "maintenance 队列上，与分折 Worker 无关，故 Worker 停摆不影响回收"
+            if row["status"] == "timeout"
+            else f"Worker 被杀后 Run 停在 {row['status']}，等待回收；"
+            "若长期停在这里，说明 beat 的维护队列或 schedule 没生效"
         ),
     }
     merge({"zombie_test": facts})
@@ -662,7 +664,11 @@ def cancel_test(wait_seconds: int = 20) -> None:
         "cancel_requested_in_db": bool(row["cancel_requested"]),
         "cost_actual": float(row["cost_actual"] or 0),
         "cancel_effective": final.get("status") == "cancelled",
-        "note": "cancel_requested 已落库却仍跑到终态 → 取消在真机上没有生效",
+        "note": (
+            "取消在下一个检查点生效：状态 running → cancelled"
+            if final.get("status") == "cancelled"
+            else "cancel_requested 已落库却仍跑到终态 → 取消没有生效"
+        ),
     }
     merge({"cancel_test": facts})
     print(json.dumps(facts, ensure_ascii=False, indent=1, default=str))
@@ -725,7 +731,15 @@ def main(argv: list[str]) -> int:
         refresh()
         return 0
     if "--cancel-test" in argv:
-        cancel_test()
+        # 允许指定"等几秒再取消"：取消必须落在**分析进行中**。
+        # 太晚就等于在测"取消一个已经跑完的 Run" —— 第一版就是这么误判的。
+        index = argv.index("--cancel-test")
+        wait = (
+            int(argv[index + 1])
+            if len(argv) > index + 1 and argv[index + 1].isdigit()
+            else 20
+        )
+        cancel_test(wait)
         return 0
     if "--contract" in argv:
         contract()

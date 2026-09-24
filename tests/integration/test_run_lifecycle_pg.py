@@ -15,11 +15,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.analysis.heartbeat import CancelledError
+from app.analysis.heartbeat import DEFAULT_HEARTBEAT_TIMEOUT_SECONDS, CancelledError
 from app.analysis.idempotency import ErrorKind, InputFormatError
 from app.analysis.retry import RetryPolicy
 from app.analysis.runner import RunExecutor, RunRequest, create_run
-from app.db import SessionLocal
+from app.db import SessionLocal, engine
 from app.gateways.base import ModelUnavailableError
 from app.models import DataSource, Project, User, enums
 from app.repositories import (
@@ -282,7 +282,7 @@ def test_terminal_run_is_never_reclaimed(session, ctx):
     runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_COMPLETED)
     session.flush()
 
-    assert runs.reclaim_zombies(timeout_seconds=1) == []
+    assert runs.reclaim_zombies(timeout_seconds=1, project_id=project.id) == []
     session.expire_all()
     assert runs.get(project.id, run_id).status == enums.AGENT_RUN_COMPLETED
 
@@ -1231,3 +1231,235 @@ def test_retry_refuses_when_original_input_was_not_recorded(session, ctx):
         retry_analysis_run(scope=RunScope(run=run, project_id=project.id), session=session)
     assert excinfo.value.status_code == 422
     assert "原始输入" in str(excinfo.value.detail)
+
+
+# ============================================================
+# 回归（2026-09-24 真机核验）：started_at / 取消 / 僵尸回收
+#
+# 这三条的共同形态与阶段 07 一模一样：代码齐全、单测全绿，
+# **真机上一次都没生效**。所以每条测试都从真实入口走一遍，
+# 而不是只测那个函数本身。
+# ============================================================
+
+
+def test_running_transition_stamps_started_at_once(session, ctx):
+    """置 `running` 时必须写 `started_at`，且后续流转不得改写。
+
+    `started_at` 是月度预算的**唯一**取数依据（`cost_sum_since` 的 SQL 带
+    `started_at is not null`）。真机核验发现：全库 177 条 Run、其中 91 条真的
+    花过钱，`started_at` 非空的是 0 条 —— 真实花费被 SQL 全部排除，
+    "本月已花"恒为 0，月度闸门对真实用量永远不触发。
+    """
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    session.flush()
+    assert runs.get(project.id, run_id).started_at is None, "创建时还不该有执行起点"
+
+    assert runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_RUNNING) is True
+    session.flush()
+    stamped = runs.get(project.id, run_id).started_at
+    assert stamped is not None, "置 running 必须写 started_at，否则月度预算永远读不到花费"
+
+    assert runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_COMPLETED) is True
+    session.flush()
+    assert runs.get(project.id, run_id).started_at == stamped, "后续流转不得改写执行起点"
+
+
+def test_monthly_spend_counts_a_run_that_really_started(session, ctx):
+    """跑过的 Run 必须被 `cost_sum_since` 计入 —— 这是月度闸门能触发的前提。"""
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_RUNNING)
+    runs.get(project.id, run_id).cost_actual = 0.5
+    runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_COMPLETED)
+    session.flush()
+
+    month_start = datetime.now(UTC).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
+    assert runs.cost_sum_since(project.id, month_start) == pytest.approx(0.5)
+
+
+def test_cancel_flag_is_read_from_the_database_not_from_the_cached_object(session, ctx):
+    """取消标记必须**每次查库**，不能依赖会话里缓存的那个对象。
+
+    Worker 的会话早把这个 Run 载入了身份映射（`_execute` 开头读过），
+    而 SQLAlchemy 不会拿库里的新值去覆盖一个**有待写改动**的对象 ——
+    于是 API 进程置的位在 Worker 侧永远看不见。
+    """
+    from sqlalchemy import text as _text
+
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    # 必须先提交：未提交的 INSERT 对别的连接不可见，那条 UPDATE 会**静默影响 0 行**
+    # （第一版测试就栽在这里，误以为"读不到"是代码问题）。
+    session.commit()
+    runs.get(project.id, run_id)  # 载入身份映射
+    runs.touch_heartbeat(project.id, run_id)  # 弄脏（尚未 flush，故不持行锁）
+
+    with engine.begin() as conn:
+        updated = conn.execute(
+            _text("update agent_runs set cancel_requested = true where id = :r"),
+            {"r": run_id},
+        ).rowcount
+    assert updated == 1, "外部连接的取消写入没有落到行上，测试前提不成立"
+
+    assert runs.is_cancel_requested(project.id, run_id) is True
+
+
+def test_worker_releases_the_row_lock_so_cancel_can_land(session, ctx):
+    """取消要能生效，Worker 就不能把 `agent_runs` 那一行锁到任务结束。
+
+    真机核验（2026-09-24）：分析进行到一半调取消，接口 200、`cancel_requested`
+    也确实进了库 —— 但那是 **Worker 提交之后**才进去的，取消从未生效；
+    根因经复现确认是行锁（`LockNotAvailable`）。
+
+    这条测试把两半都钉住：
+      ① 分析进行中，另一个连接能立刻写入取消标记（说明行锁已随 checkpoint 释放）；
+      ② 下一个检查点读到它，Run 被收成 `cancelled`。
+    """
+    from sqlalchemy import text as _text
+
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    session.commit()  # 让另一个连接看得见这个 Run
+
+    executor = RunExecutor(run_repository=runs, checkpoint=session.commit)
+    cancel_written: list[bool] = []
+
+    def attempt_tier(tier: str) -> str:
+        with engine.begin() as conn:
+            conn.execute(_text("set local lock_timeout = '2s'"))
+            conn.execute(
+                _text("update agent_runs set cancel_requested = true where id = :r"),
+                {"r": run_id},
+            )
+        cancel_written.append(True)
+        return "本轮分析已结束"
+
+    outcome = executor.execute(
+        project_id=project.id,
+        run_id=run_id,
+        attempt_tier=attempt_tier,
+        start_tier="L2",
+    )
+
+    assert cancel_written == [True], "取消写入被 Worker 的行锁挡住了"
+    assert outcome.status == enums.AGENT_RUN_CANCELLED
+    # 收尾提交：executor 的 checkpoint 已经把 running 提交出去了，
+    # 不提交终态的话这条 Run 会以 `running` 留在库里（跨测试污染：
+    # 全局扫描的 reclaim_zombies 会把它当僵尸捞出来）。测试自己造成的状态，自己收干净。
+    session.commit()
+
+
+def test_reap_zombie_runs_task_reclaims_a_stale_running_run(session, ctx):
+    """僵尸回收必须**经 beat 那条任务入口**生效，而不只是 repository 里可用。
+
+    以前只在 repository 层测过 `reclaim_zombies`，而真机上没有任何东西调它：
+    `celery_app` 里连 `beat_schedule` 都没有，beat 容器一直空转。
+    真机实测：分析中强杀 Worker，Run 停在原状态，超过心跳阈值十分钟无人回收。
+    """
+    from app.tasks.maintenance import reap_zombie_runs
+
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_RUNNING)
+    runs.touch_heartbeat(
+        project.id,
+        run_id,
+        at=datetime.now(UTC) - timedelta(seconds=DEFAULT_HEARTBEAT_TIMEOUT_SECONDS + 60),
+    )
+    session.commit()  # 任务在另一个会话里读
+
+    result = reap_zombie_runs.apply().get()
+    assert run_id in result["run_ids"], "心跳超时的 running Run 必须被任务收走"
+
+    fresh = SessionLocal()
+    try:
+        row = AgentRunRepository(fresh).get(project.id, run_id)
+        assert row.status == enums.AGENT_RUN_TIMEOUT
+        assert (row.run_metadata or {}).get("stop_reason") == "timeout"
+    finally:
+        fresh.close()
+
+
+def test_reaped_run_cannot_be_resurrected_by_a_late_worker(session, ctx):
+    """被回收成 `timeout` 的 Run 不能被"迟到的 Worker"复活成 `completed`。
+
+    真机复验（2026-09-24）撞到的真实后果：分析中冻结 Worker 容器 → beat 上的
+    维护 worker 把 Run 收成 `timeout`（终态）→ 解冻后那个 Worker 从中断处继续跑完，
+    又把终态写成 `completed`。根因是状态判定读的是**会话里几分钟前载入的对象**，
+    而跨进程的"终态不可再改"必须查库判断。
+    """
+    from app.analysis.state_machine import IllegalTransitionError
+
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_RUNNING)
+    session.commit()
+
+    # Worker 侧：像 `_execute` 开头那样把对象载入会话（此后它一直是脏/旧的）
+    worker_session = SessionLocal()
+    worker_runs = AgentRunRepository(worker_session)
+    assert worker_runs.get(project.id, run_id).status == enums.AGENT_RUN_RUNNING
+
+    # 回收者：另一个会话把它收成 timeout
+    reaper = SessionLocal()
+    AgentRunRepository(reaper).apply_status(
+        project.id, run_id, target=enums.AGENT_RUN_TIMEOUT, reason="heartbeat_lost"
+    )
+    reaper.commit()
+    reaper.close()
+
+    # 迟到的 Worker 想写 completed → 终态不可改，必须被拒
+    with pytest.raises(IllegalTransitionError):
+        worker_runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_COMPLETED)
+    worker_session.close()
+
+    fresh = SessionLocal()
+    try:
+        assert (
+            AgentRunRepository(fresh).get(project.id, run_id).status
+            == enums.AGENT_RUN_TIMEOUT
+        ), "终态没有被改写"
+    finally:
+        fresh.close()
+
+
+def test_metadata_merge_keeps_other_writers_keys(session, ctx):
+    """Worker 收尾合并 `run_metadata` 时必须基于**库里的当前值**。
+
+    真机复验（2026-09-24）撞到的：Run 被回收成 `timeout`（写入了 stop_reason 与
+    note），解冻后迟到的 Worker 用会话里几分钟前的旧 metadata 合并，
+    把回收者写的**原因抹掉了** —— 库里只剩"状态 timeout、没有为什么"。
+    """
+    project, source, runs = ctx
+    run_id, _, _ = create_run(runs, _request(project, source))
+    runs.apply_status(project.id, run_id, target=enums.AGENT_RUN_RUNNING)
+    session.commit()
+
+    worker_session = SessionLocal()
+    worker_runs = AgentRunRepository(worker_session)
+    worker_runs.get(project.id, run_id)  # Worker 载入（此后是旧快照）
+
+    reaper = SessionLocal()
+    AgentRunRepository(reaper).apply_status(
+        project.id,
+        run_id,
+        target=enums.AGENT_RUN_TIMEOUT,
+        reason="heartbeat_lost",
+        metadata={"stop_reason": "timeout", "note": "Worker 心跳丢失，Run 已被回收"},
+    )
+    reaper.commit()
+    reaper.close()
+
+    merged = worker_runs.merge_run_metadata(
+        project.id, run_id, {"insight_count": 3, "context_tokens": 1234}
+    )
+    worker_session.commit()
+    worker_session.close()
+
+    assert merged is not None
+    assert merged["stop_reason"] == "timeout", "回收原因被旧快照抹掉了"
+    assert merged["note"].startswith("Worker 心跳丢失")
+    assert merged["insight_count"] == 3, "新信息也要并进去"

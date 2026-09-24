@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     monthly_budget: float = 10.0
     default_run_max_cost: float = 0.30
 
+    # --- 可靠性 ---
+    # 僵尸 Run 的周期扫描间隔（秒）。心跳超时是 300s（见
+    # app/analysis/heartbeat.py 的 DEFAULT_HEARTBEAT_TIMEOUT_SECONDS），
+    # 扫描比它勤得多才有意义：否则"回收"最坏要等两倍超时。
+    zombie_reap_interval_seconds: int = 60
+
     # --- 时间 / 日志 ---
     default_timezone: str = "Asia/Shanghai"
     log_level: str = "INFO"

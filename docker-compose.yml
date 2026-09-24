@@ -152,14 +152,24 @@ services:
     <<: *app-image
     container_name: logagent-beat
     restart: unless-stopped
-    # 僵尸回收的周期扫描挂在这里（阶段 08 的 last_heartbeat 判据）
+    # 僵尸回收的周期扫描挂在这里（阶段 08 的 last_heartbeat 判据）。
+    #
+    # 为什么是"内嵌 beat 的 worker"而不是纯 beat：
+    # 回收任务必须由一个**独立于分析 worker** 的消费者执行 ——
+    # 分析 worker 挂了正是它要处理的场景，把两者放同一个队列/进程里等于没有回收。
+    # 故：beat 负责按时发任务，同一个容器里的 worker 只消费 `maintenance` 队列。
     command:
       - celery
       - -A
       - app.celery_app
-      - beat
+      - worker
+      - -P
+      - solo
       - -l
       - info
+      - -Q
+      - maintenance
+      - -B
     depends_on:
       migrate:
         condition: service_completed_successfully

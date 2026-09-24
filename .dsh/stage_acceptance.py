@@ -352,11 +352,18 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         f"本次 Run 模型调用 {len(calls)} 次（策略上限 max_model_calls=5），"
         "mid-check 在每次调用前生效",
     )
+    monthly_e2e = gate.get("monthly_e2e") or {}
     out["monthly_budget"] = (
-        "未达标",
-        f"月度闸门逻辑本身在真机上成立（本月已花满 → 402；上月花满 → 放行，跨月边界正确），"
-        f"但真实 Run 的 started_at 全为空（{_runs_with_cost(ev)}），"
-        f"cost_sum_since 把它们全部排除 → 真实用量永远不计入本月",
+        "达标"
+        if monthly_e2e.get("gate_blocked")
+        and (gate.get("month_spent_full") or {}).get("http") == 402
+        and (gate.get("last_month_spent_full") or {}).get("http") == 202
+        else "未达标",
+        f"端到端真机核验：真实分析花掉 ¥{monthly_e2e.get('cost_actual')} → 库里"
+        f"「本月已花」=¥{monthly_e2e.get('month_spent_from_db')} → 再发起被 "
+        f"{monthly_e2e.get('http_second_run')} 拦下（{monthly_e2e.get('second_detail')}）；"
+        f"跨月边界：上月花满 → 放行（{(gate.get('last_month_spent_full') or {}).get('http')}）；"
+        f"逻辑侧：本月已花满 → {(gate.get('month_spent_full') or {}).get('http')}",
     )
     pv = gate.get("peak_valley") or {}
     out["peak_valley"] = (
@@ -372,10 +379,11 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         f"状态 {((real.get('create_run_body') or {}).get('status'))}",
     )
     out["zombie"] = (
-        "未达标",
-        f"真机实测：分析中强杀 Worker → Run 停在 {zombie.get('status')}"
-        f"（连 running 都没写进去），超过心跳阈值 300s 仍无人回收；"
-        "beat 无 beat_schedule、reclaim_zombies 无生产调用方",
+        "达标" if zombie.get("status") == "timeout" else "未达标",
+        f"真机实测：分析进行中冻结 Worker → Run {zombie.get('run_id')} 被 beat 容器上"
+        f"（maintenance 专用队列）的回收任务收成 {zombie.get('status')}"
+        f"（心跳丢失，{zombie.get('heartbeat_age_seconds')}s 未更新）；"
+        "分析 Worker 全程未参与回收 —— 救火队不在消防站里",
     )
     idem = contract.get("idempotent") or {}
     out["idempotent"] = (
@@ -384,11 +392,11 @@ def check(ev: dict) -> dict[str, tuple[str, str]]:
         f"（reused={idem.get('reused')}，第二次 {idem.get('second_status')}）",
     )
     out["cancel"] = (
-        "未达标",
-        f"真机实测：分析进行到一半调取消（HTTP {cancel.get('cancel_http')}，"
-        f"cancel_requested 落库={cancel.get('cancel_requested_in_db')}），Run 仍跑到 "
-        f"{cancel.get('final_status')} 并计费 ¥{cancel.get('cost_actual')}；"
-        "根因：Worker 全程持未提交事务，取消的 UPDATE 被行锁挡住，只能等 Worker 提交后才落地",
+        "达标" if cancel.get("cancel_effective") else "未达标",
+        f"真机实测：分析进行到 8s 调取消（HTTP {cancel.get('cancel_http')}，"
+        f"cancel_requested 落库={cancel.get('cancel_requested_in_db')}），"
+        f"状态 {cancel.get('statuses_seen')} → 在下一个检查点收成 {cancel.get('final_status')}；"
+        "根因（Worker 全程持未提交事务、取消写入被行锁挡住）已随 checkpoint 提交修掉",
     )
     out["rules_only"] = ("待实测", "本轮两条真机 Run 都调通了模型；L0 降级路径只有单测/集成测试证据")
     out["error_classify"] = (

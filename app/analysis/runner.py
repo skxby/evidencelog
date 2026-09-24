@@ -184,6 +184,7 @@ class RunExecutor:
         sleep: Callable[[float], None] | None = None,
         rng: random.Random | None = None,
         now: Callable[[], datetime] | None = None,
+        checkpoint: Callable[[], None] | None = None,
     ) -> None:
         validate_heartbeat_timeout(heartbeat_timeout_seconds)
         self.runs = run_repository
@@ -192,11 +193,26 @@ class RunExecutor:
         self.sleep = sleep
         self.rng = rng
         self._now = now or (lambda: datetime.now(timezone.utc))
+        #: 状态/心跳写完之后调用（生产传 `session.commit`）。
+        #:
+        #: 为什么必须有这个缝：不提交的话，从第一次 `apply_status(running)` 开始，
+        #: 这条 `agent_runs` 行就被 Worker 的写锁占到任务结束 —— 别的连接（API 的取消、
+        #: beat 的僵尸回收）只能干等。真机实测：分析进行到一半调取消，接口返回 200、
+        #: `cancel_requested` 也确实落库了，但 Run 是**跑完之后**才看到这个标记的，
+        #: 于是"取消"从未生效过（2026-09-24 真机核验报告 3.7）。
+        #: 默认 None = 保持"整个任务一个事务"的旧行为，测试与脚本可以不出声地沿用。
+        self._checkpoint = checkpoint
+
+    def _commit_checkpoint(self) -> None:
+        if self._checkpoint is not None:
+            self._checkpoint()
 
     # ---------- 心跳 / 取消 ----------
 
     def heartbeat(self, project_id: int, run_id: int) -> None:
         self.runs.touch_heartbeat(project_id, run_id, at=self._now())
+        # 心跳也要立刻落地并把行锁放掉：否则下一次心跳之前，取消/回收依然被挡在门外。
+        self._commit_checkpoint()
 
     def check_cancel(self, project_id: int, run_id: int) -> None:
         """阶段边界与每次调用前的检查点（计划第 709 行）。"""
@@ -218,6 +234,9 @@ class RunExecutor:
         # ① queued → running
         try:
             self.runs.apply_status(project_id, run_id, target=enums.AGENT_RUN_RUNNING)
+            # 立刻落地：让别的连接（取消、僵尸回收）能拿到这一行，
+            # 也让 started_at 从"分析真正开始的时刻"起算（月度预算的取数依据）。
+            self._commit_checkpoint()
         except IllegalTransitionError as exc:
             # 状态已被别处改过（例如已被取消/回收）：如实返回，不强行覆盖
             current = self._current_status(project_id, run_id)
@@ -371,5 +390,9 @@ class RunExecutor:
         return metadata
 
     def _current_status(self, project_id: int, run_id: int) -> str:
+        """当前状态：查库取，不读会话里那个可能已过期的对象。"""
+        fresh = getattr(self.runs, "status_of", None)
+        if callable(fresh):
+            return fresh(project_id, run_id) or "unknown"
         run = self.runs.get(project_id, run_id)
         return str(run.status) if run is not None else "unknown"

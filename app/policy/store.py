@@ -23,6 +23,16 @@ def policy_from_settings() -> RunPolicy:
     调成 0.05，代码仍按硬编码的 0.30 放行。它是一道**花钱的闸门**，
     静默失效的方向恰好是"多花钱"。
 
+    `MONTHLY_BUDGET` 也是同一形态，而且更难发现：上一轮把它"接上了"
+    （`pre_check` 里加了月度判定、`cost_sum_since` 也写好了），
+    但**这个函数只把单次上限从配置搬进策略**，月度预算仍取 dataclass 的默认
+    10.0 —— 于是 .env 里把 MONTHLY_BUDGET 改成 0.02 完全不起作用。
+    真机核验（2026-09-24）就是这么发现的：把月度预算调到 ¥0.02 后，
+    真实花费 ¥0.0123 仍能继续发起分析。
+    `settings_usage_audit` 漏掉它是因为 `.monthly_budget` 在别处出现过
+    （读的是**策略对象**的属性，不是配置），工具的判据分不清这两者 ——
+    这也是为什么"配置项是摆设"必须靠**行为测试**钉住，不能只靠文本审计。
+
     取值**负数**会在首次使用时由 `RunPolicy.__post_init__` 直接报错 ——
     配错了就该立刻响，而不是等跑出账单。
     `0` 是合法值，语义为"这个 Run 一分钱都不许花"（pre-check 会直接拒绝创建），
@@ -35,8 +45,13 @@ def policy_from_settings() -> RunPolicy:
     from app.config import get_settings
 
     settings = get_settings()
-    raw = getattr(settings, "default_run_max_cost", DEFAULT_POLICY.run_max_cost)
-    return replace(DEFAULT_POLICY, run_max_cost=float(raw))
+    raw_cost = getattr(settings, "default_run_max_cost", DEFAULT_POLICY.run_max_cost)
+    raw_month = getattr(settings, "monthly_budget", DEFAULT_POLICY.monthly_budget)
+    return replace(
+        DEFAULT_POLICY,
+        run_max_cost=float(raw_cost),
+        monthly_budget=float(raw_month),
+    )
 
 
 class ProjectPolicyStore:

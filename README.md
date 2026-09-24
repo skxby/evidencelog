@@ -133,6 +133,7 @@ logagent-beat       Up
 | `MODEL_CACHE_HIT_INPUT_PRICE_PER_1M` | `0.02` | 缓存命中的输入单价（比输入价低一个数量级）。按命中 token 数单独计费，不配则按正常输入价 |
 | `MODEL_PEAK_PRICE_MULTIPLIER` | `2` | 高峰时段倍数（窗口＝工作日 9–12、14–18 点，按 `DEFAULT_TIMEZONE`）；单价按闲时价填，填 1 表示不区分峰谷 |
 | `MONTHLY_BUDGET` / `DEFAULT_RUN_MAX_COST` | `10` / `0.30` | 月度预算 / 单次 Run 上限，货币单位统一为**人民币元**；`0` 表示该项不设上限（单次为 `0` 则是"不许花钱"） |
+| `ZOMBIE_REAP_INTERVAL_SECONDS` | `60` | 僵尸 Run 的周期扫描间隔（beat 任务）。心跳超时是 300s，扫描必须比它勤 |
 | `DATA_DIR` | `./data` | 运行时数据（知识库 confirmed/staging）；compose 里是 `/app/data`（卷） |
 | `DEFAULT_TIMEZONE` | `Asia/Shanghai` | 日志时间戳缺时区时按它解析，再转 UTC 存库 |
 
@@ -183,7 +184,12 @@ alembic upgrade head
 pytest -q                                          # 单测 + 集成测试
 uvicorn app.main:app --reload                      # http://127.0.0.1:8000
 celery -A app.celery_app worker -P solo -l info    # Windows 必须 -P solo
+celery -A app.celery_app worker -P solo -l info -Q maintenance -B   # 僵尸回收（beat + 维护队列）
 ```
+
+> 第三个进程不是可选的：**僵尸 Run 的回收靠它**。分析 worker 挂了正是它要处理的场景，
+> 所以它必须独立于分析 worker（走 `maintenance` 队列），否则回收任务会和分析任务
+> 一起被卡住 —— compose 里这件事由 `logagent-beat` 容器负责。
 
 ### 跑 Golden Set
 
@@ -235,15 +241,18 @@ RUN_LIVE_MODEL_TESTS=1 pytest tests/integration/test_gateway_live.py -v -s
 Golden   离线 18/18 断言 ¥0
 E2E      容器全栈 16/16；真实调用 1607/3058 tokens、¥0.0138、7 条结论
 真机分析 真实语料 Mac_2k 2000 事件 → 12 结论 12 证据、L2→L3、¥0.0237
-全量     pytest 725 passed / 3 skipped（跳过的是需 RUN_LIVE_MODEL_TESTS=1 的付费用例）
-验收     58 条验收：39 达标 / 8 待实测 / 11 真机未达标
+成本闸门 真实花掉 ¥0.0167 → 库里「本月已花」同步 → 再发起被 402 拦下；上月花满 → 放行
+可靠性   分析中调取消 → running→cancelled；冻结 Worker → 维护队列把 Run 收成 timeout
+全量     pytest 735 passed / 3 skipped（跳过的是需 RUN_LIVE_MODEL_TESTS=1 的付费用例）
+验收     58 条验收：42 达标 / 8 待实测 / 8 真机未达标
 ```
 
-> ⚠️ **11 条真机未达标**（测试全绿但真实路径上没生效）逐条列在
+> ⚠️ **8 条真机未达标**（测试全绿但真实路径上没生效）逐条列在
 > 《[真机核验报告-2026-09-24.md](真机核验报告-2026-09-24.md)》里，
-> 含根因与最小修复。最影响使用的是：月度预算取数（`started_at` 从不写入）、
-> 取消不生效（Worker 长事务持锁）、僵尸 Run 无人回收（beat 无 schedule）、
-> 分组/事故不落库、runbook 从不挂上、工具注册表没接进管线。
+> 含根因与最小修复。最影响使用的是：分组/事故不落库（事故记忆库恒空）、
+> runbook 从不挂上、工具注册表没接进管线。
+> 首轮查出 11 条，其中月度预算取数、取消不生效、僵尸 Run 无人回收
+> 三条已于当晚修复并真机复验（报告第 0 节）。
 
 > `logs/` 是外部公开真实日志语料（出处见 `logs/README.md`），已在版本库内，
 > 故**全新 clone 也跑得了这些基线**（`.gitattributes` 对 `logs/*.log` 关掉了

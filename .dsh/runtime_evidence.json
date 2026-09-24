@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-09-24T20:03:47",
+ "generated_at": "2026-09-24T20:49:44",
  "base": "http://127.0.0.1:8001",
  "scenarios": [
   {
@@ -2455,27 +2455,27 @@
   }
  },
  "cancel_test": {
-  "run_id": 3028,
-  "project_id": 6949,
+  "run_id": 3140,
+  "project_id": 7172,
   "cancel_http": 200,
   "statuses_seen": [
-   "queued",
-   "completed"
+   "running",
+   "cancelled"
   ],
-  "final_status": "completed",
+  "final_status": "cancelled",
   "cancel_requested_in_db": true,
-  "cost_actual": 0.032416,
-  "cancel_effective": false,
+  "cost_actual": 0.030922,
+  "cancel_effective": true,
   "note": "cancel_requested 已落库却仍跑到终态 → 取消在真机上没有生效"
  },
  "zombie_test": {
-  "run_id": 3029,
-  "project_id": 6950,
-  "status": "queued",
-  "heartbeat_age_seconds": null,
-  "checked_at": "2026-09-24 12:03:47.143184+00:00",
-  "error": null,
-  "note": "Worker 被杀后 Run 停在 queued（running 那次写入随事务一起丢了）；真机上没有任何东西回收它 —— beat 容器空转（celery_app 里没有 beat_schedule），且 find_zombie_runs 只认 running（停在 queued 的连扫描条件都不满足）。"
+  "run_id": 3378,
+  "project_id": 7486,
+  "status": "timeout",
+  "heartbeat_age_seconds": 104.3,
+  "checked_at": "2026-09-24 12:49:44.733483+00:00",
+  "error": "heartbeat lost",
+  "note": "已由维护队列回收为 timeout（心跳丢失）—— 回收者住在 beat 容器的 maintenance 队列上，与分折 Worker 无关，故 Worker 停摆不影响回收"
  },
  "budget_gate": {
   "monthly_budget_setting": 10.0,
@@ -2521,10 +2521,21 @@
    "billed_formula_L3_peak_forced": 0.032,
    "peak_multiplier": 2.0,
    "estimate_ignores_peak": true
+  },
+  "monthly_e2e": {
+   "http_first_run": 202,
+   "run_id": 3148,
+   "run_status": "completed",
+   "started_at": "2026-09-24 12:30:21.677738+00:00",
+   "cost_actual": 0.016743,
+   "month_spent_from_db": 0.016743,
+   "http_second_run": 402,
+   "second_detail": "本月已花 ¥0.0167，月度预算 ¥0.0200 剩余 ¥0.0033 不足以覆盖预计成本 ¥0.0088",
+   "gate_blocked": true
   }
  },
  "pytest": {
-  "tests": 725,
+  "tests": 735,
   "failures": 0,
   "errors": 0,
   "skipped": 3

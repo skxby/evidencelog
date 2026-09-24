@@ -77,7 +77,7 @@ def _execute(
         # 而这个数字是唯一能一眼看出来的证据
         logger.info("run_events_loaded", event_count=len(events))
 
-        executor = RunExecutor(run_repository=runs)
+        executor = RunExecutor(run_repository=runs, checkpoint=session.commit)
         captured: dict[str, Any] = {}
 
         # 一次 Run 一个成本控制器：三道检查点（Pre 已在创建端点做过、
@@ -256,7 +256,9 @@ def _execute(
             metadata_extra["used_rules_only"] = bool(result.used_rules_only)
             metadata_extra["context_tokens"] = int(result.context_tokens)
             metadata_extra["model_attempts"] = result.model_attempts
-        run.run_metadata = {**(run.run_metadata or {}), **metadata_extra}
+        # 合并必须基于**库里的当前值**：这段时间里 Run 可能已被回收/取消，
+        # 那些原因（stop_reason / note）不能被这份旧快照抹掉。
+        runs.merge_run_metadata(project_id, run_id, metadata_extra)
 
         # 终态与花费：这次分析到底干了什么的一句话总结。放在成本回填之后 ——
         # 放前面的话 tokens/cost 还是 0，日志会替库里"作证"说这次没花钱。
@@ -386,7 +388,11 @@ def _record_crash(
         run = runs.get(project_id, run_id)
         if run is None:
             return
-        current = str(run.status)
+        # 状态要查库取：这个会话里的对象可能是分析开始那一刻载入的，
+        # 而在它"崩溃"之前，Run 可能已经被回收成 timeout / 被置为 cancelled。
+        current = runs.status_of(project_id, run_id)
+        if current is None:
+            return
         if current in enums.AGENT_RUN_TERMINAL_STATES:
             logger.error(
                 "execute_run_crashed_after_terminal",

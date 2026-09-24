@@ -99,8 +99,21 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
         return True
 
     def is_cancel_requested(self, project_id: int, run_id: int) -> bool:
-        run = self.get(project_id, run_id)
-        return bool(run.cancel_requested) if run is not None else False
+        """取消标记的**即时**读取（计划第 709 行）。
+
+        为什么直接查列、而不是读 ORM 对象：
+        Worker 的会话里这个 Run 早就在身份映射里了（`_execute` 开头载入过），
+        而 SQLAlchemy 对**已加载**的对象默认不用库里新值覆盖它
+        （要覆盖得显式 `populate_existing()`）。于是 API 进程置的位在 Worker 侧
+        永远看不见 —— 真机实测过：`cancel_requested` 已落库，Run 仍跑到 completed。
+        查标量列绕开身份映射，读到的就是库里的当前值。
+        """
+        value = self.session.execute(
+            select(AgentRun.cancel_requested).where(
+                AgentRun.project_id == project_id, AgentRun.id == run_id
+            )
+        ).scalar_one_or_none()
+        return bool(value)
 
     def find_zombie_runs(
         self,
@@ -193,6 +206,58 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
 
     # ---------- 状态写入 ----------
 
+    def status_of(self, project_id: int, run_id: int) -> str | None:
+        """当前状态的**即时**读取（查标量列，绕开身份映射）。
+
+        为什么不能读 ORM 对象：Worker 的会话从 `_execute` 开头就持有这个 Run，
+        它的 `status` 停留在载入那一刻。真机复验撞到过后果：
+        Run 已被回收成 `timeout`（终态），解冻后的 Worker 仍按内存里的 `running`
+        做状态判定，于是把终态**复活**成 `completed` ——
+        "不可再改"这条约束在跨进程场景下形同虚设。
+
+        先 `flush()` 再查：本项目的 sessionmaker 是 `autoflush=False`，
+        不先落盘的话，**同一会话里刚写的状态**（比如刚置的 running）查不到，
+        会得出"还是 queued"这种自相矛盾的结论。
+        """
+        self.session.flush()
+        value = self.session.execute(
+            select(AgentRun.status).where(
+                AgentRun.project_id == project_id, AgentRun.id == run_id
+            )
+        ).scalar_one_or_none()
+        return str(value) if value is not None else None
+
+    def metadata_of(self, project_id: int, run_id: int) -> dict[str, Any]:
+        """`run_metadata` 的**即时**读取（查标量列，绕开身份映射）。
+
+        同样先 flush：本项目 `autoflush=False`，不落盘就会读到自己写入之前的旧值。
+        """
+        self.session.flush()
+        value = self.session.execute(
+            select(AgentRun.run_metadata).where(
+                AgentRun.project_id == project_id, AgentRun.id == run_id
+            )
+        ).scalar_one_or_none()
+        return dict(value or {})
+
+    def merge_run_metadata(
+        self, project_id: int, run_id: int, extra: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """把额外信息并入 `run_metadata`：**先查库取当前值**，再合并写回。
+
+        为什么要查库：Worker 会话里的对象可能载入于几分钟前，直接
+        `{**run.run_metadata, **extra}` 会把别人（回收者 / 取消者）写进去的 key 抹掉。
+        真机复验撞到过：Run 被回收成 `timeout`（写入 stop_reason 与 note），
+        解冻后迟到的 Worker 用旧值合并，把原因覆盖没了 ——
+        库里只剩"状态 timeout、没有为什么"，正是红线 4 要禁止的含糊。
+        """
+        run = self.get(project_id, run_id)
+        if run is None:
+            return None
+        merged = {**self.metadata_of(project_id, run_id), **extra}
+        run.run_metadata = merged
+        return merged
+
     def apply_status(
         self,
         project_id: int,
@@ -210,8 +275,13 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
         if run is None:
             return False
 
+        # 状态判定必须用**库里的当前值**：同一会话里的对象可能是几分钟前载入的，
+        # 而这段时间里 Run 可能已经被回收/取消。
+        current = self.status_of(project_id, run_id)
+        if current is None:
+            return False
         machine = StateMachine(
-            status=run.status,
+            status=current,
             current_phase=run.current_phase,
             phase_history=run.phase_history,
         )
@@ -219,6 +289,14 @@ class AgentRunRepository(ProjectScopedRepository[AgentRun]):
 
         run.status = machine.status
         run.phase_history = machine.phase_history
+        # 执行起点：**只在首次进入 running 时写**。
+        #
+        # 它是月度预算的取数依据（`cost_sum_since` 的 SQL 带 `started_at is not null`），
+        # 而此前没有任何代码写过它 —— 真机核验发现全库 177 条 Run、其中 91 条真的花过钱，
+        # `started_at` 非空的是 0 条：真实花费被 SQL 全部排除，"本月已花"恒为 0，
+        # 月度闸门对真实用量永远不触发（2026-09-24 真机核验报告 3.4）。
+        if target == enums.AGENT_RUN_RUNNING and run.started_at is None:
+            run.started_at = datetime.now(timezone.utc)
         if target in enums.AGENT_RUN_TERMINAL_STATES:
             run.finished_at = datetime.now(timezone.utc)
         if metadata is not None:

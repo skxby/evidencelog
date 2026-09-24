@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import http.cookiejar
 import json
+import os
 import pathlib
 import secrets
 import sys
@@ -35,7 +36,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-BASE = "http://127.0.0.1:8000"
+BASE = os.environ.get("EVIDENCE_BASE", "http://127.0.0.1:8000")
 EVIDENCE = ROOT / ".dsh" / "runtime_evidence.json"
 JAR = http.cookiejar.CookieJar()
 OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(JAR))
@@ -107,7 +108,110 @@ def new_source(token: str, project_id: int) -> int:
     return source["id"]
 
 
+def monthly_e2e() -> None:
+    """**端到端**月度预算核验：真花掉一笔钱，再让闸门真的拦住。
+
+    与 ④⑤ 的区别：④⑤ 的"本月已花"是手工插的历史 Run 造出来的，
+    证明的是**逻辑**；这里跑一次真实分析，让它自己把 `started_at` 与
+    `cost_actual` 写进去，再发起第二次 —— 证明的是**取数链路**
+    （Worker 写 started_at → cost_sum_since 汇总 → Pre-check 拦下）。
+
+    需要把 `MONTHLY_BUDGET` 调小（否则真花到 10 元太贵），所以本模式要求
+    跑在一个 `MONTHLY_BUDGET` 很小的栈上（见脚本头部用法）。
+    """
+    import time
+
+    from sqlalchemy import text
+
+    eng = engine()
+    from app.config import get_settings
+
+    budget = float(get_settings().monthly_budget)
+    print(f"本模式的月度预算 = ¥{budget}（要小到一次真实分析就能花完）")
+
+    email = f"monthly-e2e-{secrets.token_hex(4)}@example.com"
+    _, reg = call("POST", "/api/register", {"email": email, "password": "Passw0rd!23"})
+    token = reg.get("access_token") or reg.get("token")
+    pid = new_project(token)
+
+    path = ROOT / "tests" / "datasets" / "crash" / "system.log"
+    boundary = "----monthly" + secrets.token_hex(8)
+    body = bytearray()
+    body += f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{path.name}"\r\n'.encode()
+    body += b"Content-Type: text/plain\r\n\r\n" + path.read_bytes() + b"\r\n"
+    body += f'--{boundary}\r\nContent-Disposition: form-data; name="fmt"\r\n\r\ntxt\r\n'.encode()
+    body += f"--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        f"{BASE}/api/projects/{pid}/upload", data=bytes(body), method="POST"
+    )
+    req.add_header("Authorization", "Bearer " + token)
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    with OPENER.open(req, timeout=180) as response:
+        up = json.loads(response.read() or b"{}")
+
+    status, created = call(
+        "POST",
+        f"/api/projects/{pid}/analysis-runs",
+        {"data_source_id": up["data_source_id"], "start_tier": "L2"},
+        token,
+    )
+    run_id = created.get("run_id")
+    terminal = {"completed", "partial_success", "failed", "timeout", "cancelled"}
+    for _ in range(60):
+        time.sleep(2)
+        _, body_json = call("GET", f"/api/runs/{run_id}?project_id={pid}", token=token)
+        if body_json.get("status") in terminal:
+            break
+
+    with eng.connect() as conn:
+        row = conn.execute(
+            text(
+                "select status, started_at, cost_actual from agent_runs where id = :r"
+            ),
+            {"r": run_id},
+        ).one()
+        month_spent = conn.execute(
+            text(
+                "select coalesce(sum(cost_actual), 0) from agent_runs"
+                " where project_id = :p and started_at is not null"
+                "   and started_at >= date_trunc('month', now() at time zone 'UTC')"
+            ),
+            {"p": pid},
+        ).scalar_one()
+
+    status2, second = call(
+        "POST",
+        f"/api/projects/{pid}/analysis-runs",
+        {"data_source_id": up["data_source_id"], "start_tier": "L2"},
+        token,
+    )
+    facts = {
+        "http_first_run": status,
+        "run_id": run_id,
+        "run_status": row[0],
+        "started_at": str(row[1]),
+        "cost_actual": float(row[2] or 0),
+        "month_spent_from_db": float(month_spent),
+        "http_second_run": status2,
+        "second_detail": str(second.get("detail"))[:200],
+        "gate_blocked": status2 == 402 and "本月已花" in str(second.get("detail", "")),
+    }
+    payload = json.loads(EVIDENCE.read_text(encoding="utf-8")) if EVIDENCE.exists() else {}
+    merged = dict(payload.get("budget_gate") or {})
+    merged["monthly_e2e"] = facts
+    payload["budget_gate"] = merged
+    EVIDENCE.write_text(json.dumps(payload, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+
+    print(f"① 真实分析 Run {run_id} → {row[0]}，started_at={row[1]}，花费 ¥{float(row[2] or 0):.6f}")
+    print(f"② 库里「本月已花」 = ¥{float(month_spent):.6f}")
+    print(f"③ 再发起一次 → {status2} | {str(second.get('detail'))[:110]}")
+    print(f"闸门真机拦下 = {facts['gate_blocked']}")
+
+
 def main(argv: list[str]) -> int:
+    if "--monthly-e2e" in argv:
+        monthly_e2e()
+        return 0
     from app.config import get_settings
     from app.policy.wiring import build_cost_controller, month_start
     from app.utils.timestamps import is_peak_time

@@ -578,3 +578,27 @@ def test_month_start_follows_configured_timezone():
     )
     # 北京 9/1 00:00 == UTC 8/31 16:00
     assert start == datetime(2026, 8, 31, 16, 0, tzinfo=timezone.utc)
+
+
+def test_policy_from_settings_reads_both_money_knobs(monkeypatch):
+    """两道花钱的闸门都必须从配置读，不能只搬其中一个。
+
+    真机核验发现（2026-09-24）：`policy_from_settings()` 只把
+    `DEFAULT_RUN_MAX_COST` 搬进策略，`MONTHLY_BUDGET` 仍取 dataclass 的默认 10.0 ——
+    把月度预算改成 ¥0.02 后，真实花费 ¥0.0123 照样能继续发起分析。
+    单次上限那半是接上的，所以肉眼与文本审计都看不出问题：
+    `.dsh/settings_usage_audit.py` 把 cost_controller 里读**策略对象**属性的
+    `.monthly_budget` 记成了"已接线"。**行为测试才是这类缺陷的终点。**
+    """
+    import app.config as config_module
+
+    from app.policy.store import policy_from_settings
+
+    class _Settings:
+        default_run_max_cost = 0.05
+        monthly_budget = 0.02
+
+    monkeypatch.setattr(config_module, "get_settings", lambda: _Settings())
+    policy = policy_from_settings()
+    assert policy.run_max_cost == pytest.approx(0.05)
+    assert policy.monthly_budget == pytest.approx(0.02), "月度预算没从配置读，改 .env 不生效"

@@ -6,6 +6,17 @@
 - task_acks_late + reject_on_worker_lost：worker 被杀时任务可被重新投递，
   这是「僵尸 Run 回收」能成立的前提之一。
 - **Worker 也要配 structlog**：见文件末尾的说明。
+- **beat_schedule 里挂着僵尸 Run 的周期回收**：没有它，`reclaim_zombies`
+  就只是躺在 repository 里的一个函数（真机核验发现的事实）。
+
+关于"杀 Worker 之后会发生什么"，三条机制一起才完整：
+  ① `task_acks_late`：任务会被重投递，Worker 起来后能接着跑；
+  ② Worker 现在会把「running + 心跳」**立刻提交**（`RunExecutor` 的 checkpoint），
+     所以被杀时库里留下的是 `running` + 未过期的心跳 —— 这正是
+     `find_zombie_runs` 认的条件；
+  ③ 超过心跳阈值后，beat 上的回收任务把它收成 `timeout`。
+     停在 `queued`（任务从未被取走）的 Run 没有时间基准可判（冻结表里
+     AgentRun 没有 created_at），这一条**已知且刻意不猜**：靠 ① 的重投递兜底。
 """
 
 from celery import Celery
@@ -19,7 +30,7 @@ celery_app = Celery(
     "logagent",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.health", "app.tasks.analysis"],
+    include=["app.tasks.health", "app.tasks.analysis", "app.tasks.maintenance"],
 )
 
 celery_app.conf.update(
@@ -35,6 +46,27 @@ celery_app.conf.update(
     result_expires=3600,
     broker_connection_retry_on_startup=True,
     task_track_started=True,
+    # 僵尸 Run 回收（阶段 08 验收「手动 kill Worker 后僵尸 Run 被回收」）。
+    #
+    # 这条 schedule 此前**根本不存在** —— beat 容器一直在空转，
+    # `reclaim_zombies` 只有测试在调。于是 Worker 一旦被杀，Run 就永远停在那儿：
+    # 既没人回收（没有周期任务），也没人能回收（见文件头的三条机制说明）。
+    beat_schedule={
+        "reap-zombie-runs": {
+            "task": "app.tasks.maintenance.reap_zombie_runs",
+            "schedule": float(settings.zombie_reap_interval_seconds),
+        },
+    },
+    # 维护任务走**专用队列**。
+    #
+    # 第一版把它发到默认队列（和分折任务同一个），结果真机复验当场打脸：
+    # 分析 Worker 一被冻结，回收任务就跟着排在队列里没人消费 ——
+    # 而"分析 Worker 死了"恰恰是它唯一要处理的场景。**救火队不能住在消防站里。**
+    # 现在 `maintenance` 队列由 beat 容器内嵌的 worker 消费（`-Q maintenance -B`），
+    # 与 web/worker 完全独立。
+    task_routes={
+        "app.tasks.maintenance.*": {"queue": "maintenance"},
+    },
 )
 
 

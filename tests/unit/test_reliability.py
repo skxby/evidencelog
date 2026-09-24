@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.analysis.heartbeat import (
+    DEFAULT_HEARTBEAT_TIMEOUT_SECONDS,
     CancelledError,
     HeartbeatRecord,
     check_cancelled,
@@ -639,3 +640,46 @@ def test_cancelled_error_is_not_classified_as_retryable():
     """取消不是错误，不该被重试逻辑当成失败来重试。"""
     assert classify_error(CancelledError()) == ErrorKind.UNKNOWN
     assert not is_retryable(CancelledError())
+
+
+# ============================================================
+# 回归（2026-09-24 真机核验）：僵尸回收必须挂在 beat 上
+# ============================================================
+
+
+def test_beat_schedule_reaps_zombie_runs():
+    """beat 必须真的挂着回收任务，间隔取自配置。
+
+    这条 schedule 此前**不存在**：`reclaim_zombies` 只有测试在调，
+    beat 容器空转，于是"kill Worker 后僵尸 Run 被回收"在真机上从未发生过。
+    """
+    from app.celery_app import celery_app
+    from app.config import get_settings
+
+    entry = celery_app.conf.beat_schedule.get("reap-zombie-runs")
+    assert entry is not None, "beat_schedule 里没有僵尸回收任务"
+    assert entry["task"] == "app.tasks.maintenance.reap_zombie_runs"
+    assert float(entry["schedule"]) == float(get_settings().zombie_reap_interval_seconds)
+    assert "app.tasks.maintenance" in celery_app.conf.include, "任务模块必须被 worker 导入"
+    # 扫描必须比心跳超时勤，否则"回收"最坏要等两倍超时
+    assert float(entry["schedule"]) < DEFAULT_HEARTBEAT_TIMEOUT_SECONDS
+
+
+def test_zombie_reaper_runs_on_its_own_queue():
+    """回收任务必须走独立队列。
+
+    第一版把它发到默认队列（与分析任务同一个），真机复验当场打脸：
+    分析 Worker 被冻结后，回收任务跟着排队没人消费 —— 而"分析 Worker 死了"
+    正是它唯一要处理的场景。救火队不能住在消防站里。
+    """
+    from app.celery_app import celery_app
+
+    routes = celery_app.conf.task_routes or {}
+    matched = [
+        route
+        for pattern, route in routes.items()
+        if pattern.startswith("app.tasks.maintenance")
+    ]
+    assert matched, "维护任务没有单独路由，会和分折任务抢同一个被冻结的 worker"
+    assert matched[0]["queue"] == "maintenance"
+    assert celery_app.conf.task_default_queue != "maintenance", "分析任务不该挤进维护队列"
